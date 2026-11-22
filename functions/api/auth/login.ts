@@ -80,12 +80,17 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
     return Response.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
 
+  const verifiedRole =
+    account.email.toLowerCase().trim() === 'krishnadigitalai@gmail.com'
+      ? 'superadmin'
+      : account.role;
+
   const user = {
     uid: account.uid,
     email: account.email,
     name: account.name,
     hospital: account.hospital,
-    role: account.role,
+    role: verifiedRole,
   };
 
   const token = env.AUTH_SECRET ? await signToken(user, env.AUTH_SECRET) : undefined;

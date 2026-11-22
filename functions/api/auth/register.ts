@@ -82,7 +82,8 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
   const salt = crypto.randomUUID();
   const passwordHash = await hashPassword(password, salt);
   const now = new Date().toISOString();
-  const role = 'customer';
+  const isSuperAdmin = email === 'krishnadigitalai@gmail.com';
+  const role = isSuperAdmin ? 'superadmin' : 'customer';
 
   await env.DB.prepare(
     'INSERT INTO auth_accounts (uid, email, password_hash, salt, name, hospital, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -96,7 +97,7 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
     .bind(
       'users',
       uid,
-      JSON.stringify({ uid, email, name, phone: '', hospital, role, createdAt: now }),
+      JSON.stringify({ uid, email, name, phone: '', hospital, role, verified: isSuperAdmin, createdAt: now }),
       now
     )
     .run();

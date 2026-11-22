@@ -24,6 +24,7 @@ export default function AuthPage({
 
   const switchMode = (nextMode: 'signin' | 'signup') => {
     setMode(nextMode);
+    setPassword('');
     setError('');
   };
 
@@ -45,13 +46,6 @@ export default function AuthPage({
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const fillDemo = (demoEmail: string) => {
-    setMode('signin');
-    setEmail(demoEmail);
-    setPassword('password123');
-    setError('');
   };
 
   return (
@@ -113,7 +107,7 @@ export default function AuthPage({
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
             {mode === 'signup' && (
               <>
                 <div className="space-y-1.5">
@@ -124,7 +118,7 @@ export default function AuthPage({
                     id="auth-name"
                     type="text"
                     required
-                    autoComplete="name"
+                    autoComplete="off"
                     placeholder="Dr. Ananya Sharma"
                     value={name}
                     onChange={e => setName(e.target.value)}
@@ -140,7 +134,7 @@ export default function AuthPage({
                     id="auth-hospital"
                     type="text"
                     required
-                    autoComplete="organization"
+                    autoComplete="off"
                     placeholder="City Care Hospital"
                     value={hospital}
                     onChange={e => setHospital(e.target.value)}
@@ -158,7 +152,7 @@ export default function AuthPage({
                 id="auth-email"
                 type="email"
                 required
-                autoComplete="email"
+                autoComplete="off"
                 placeholder="name@hospital.in"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
@@ -176,7 +170,7 @@ export default function AuthPage({
                   type={showPassword ? 'text' : 'password'}
                   required
                   minLength={6}
-                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                  autoComplete="new-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -208,40 +202,6 @@ export default function AuthPage({
             </button>
           </form>
 
-          {mode === 'signin' && (
-            <div className="pt-4 border-t border-[#E6E7EE] space-y-2">
-              <p className="text-xs text-[#505050]">Quick demo accounts (password: password123)</p>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold">
-                <button
-                  type="button"
-                  onClick={() => fillDemo('client@sunmedx.in')}
-                  className="text-[#211D70] hover:text-[#F26522] hover:underline"
-                >
-                  Client
-                </button>
-                <span aria-hidden="true" className="text-[#D4D6E2]">
-                  ·
-                </span>
-                <button
-                  type="button"
-                  onClick={() => fillDemo('tech@sunmedx.in')}
-                  className="text-[#211D70] hover:text-[#F26522] hover:underline"
-                >
-                  Technician
-                </button>
-                <span aria-hidden="true" className="text-[#D4D6E2]">
-                  ·
-                </span>
-                <button
-                  type="button"
-                  onClick={() => fillDemo('admin@sunmedx.in')}
-                  className="text-[#211D70] hover:text-[#F26522] hover:underline"
-                >
-                  Admin
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

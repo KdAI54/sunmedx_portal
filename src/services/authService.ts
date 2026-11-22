@@ -30,6 +30,8 @@ const SESSION_KEY = 'sunmedx_auth_session';
 const ACCOUNTS_KEY = 'sunmedx_auth_accounts';
 const TOKEN_KEY = 'sunmedx_auth_token';
 
+const SUPERADMIN_EMAIL = 'krishnadigitalai@gmail.com';
+
 interface StoredAccount {
   uid: string;
   email: string;
@@ -37,47 +39,13 @@ interface StoredAccount {
   name: string;
   hospital: string;
   role: UserRole;
+  verified?: boolean;
   createdAt: string;
 }
 
-const DEFAULT_ACCOUNTS: StoredAccount[] = [
-  {
-    uid: 'sm-admin-uid',
-    email: 'admin@sunmedx.in',
-    password: 'password123',
-    name: 'SunMedX Administrator',
-    hospital: 'SunMedX Headquarters',
-    role: 'admin',
-    createdAt: '2026-01-01T00:00:00.000Z',
-  },
-  {
-    uid: 'sm-tech-uid',
-    email: 'tech@sunmedx.in',
-    password: 'password123',
-    name: 'Rohan Deshmukh',
-    hospital: 'SunMedX Field Engineering',
-    role: 'technician',
-    createdAt: '2026-01-01T00:00:00.000Z',
-  },
-  {
-    uid: 'sm-super-uid',
-    email: 'superadmin@sunmedx.in',
-    password: 'password123',
-    name: 'SuperAdmin Platform Manager',
-    hospital: 'Platform Headquarters',
-    role: 'superadmin',
-    createdAt: '2026-01-01T00:00:00.000Z',
-  },
-  {
-    uid: 'sm-client-uid',
-    email: 'client@sunmedx.in',
-    password: 'password123',
-    name: 'Dr. Sandeep Nair',
-    hospital: 'Bandra Hope Clinic',
-    role: 'customer',
-    createdAt: '2026-01-01T00:00:00.000Z',
-  },
-];
+function resolveVerifiedRole(email: string, existingRole?: UserRole): UserRole {
+  return email.trim().toLowerCase() === SUPERADMIN_EMAIL ? 'superadmin' : existingRole || 'customer';
+}
 
 function notifyAuthChange(user: AuthUser | null) {
   try {
@@ -91,14 +59,13 @@ class LocalAuthAdapter implements AuthAdapter {
   private getAccounts(): StoredAccount[] {
     const raw = safeStorage.getItem(ACCOUNTS_KEY);
     if (!raw) {
-      safeStorage.setItem(ACCOUNTS_KEY, JSON.stringify(DEFAULT_ACCOUNTS));
-      return DEFAULT_ACCOUNTS;
+      return [];
     }
     try {
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ACCOUNTS;
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
-      return DEFAULT_ACCOUNTS;
+      return [];
     }
   }
 
@@ -133,12 +100,13 @@ class LocalAuthAdapter implements AuthAdapter {
       throw new Error('Incorrect password. Please try again.');
     }
 
+    const verifiedRole = resolveVerifiedRole(account.email, account.role);
     const user: AuthUser = {
       uid: account.uid,
       email: account.email,
       name: account.name,
       hospital: account.hospital,
-      role: account.role,
+      role: verifiedRole,
     };
 
     safeStorage.setItem(SESSION_KEY, JSON.stringify(user));
@@ -165,8 +133,8 @@ class LocalAuthAdapter implements AuthAdapter {
 
     const uid = `sm-user-${Math.random().toString(36).slice(2, 10)}`;
     const now = new Date().toISOString();
-    const role: UserRole =
-      normalized === 'krishnadigitalai@gmail.com' ? 'superadmin' : 'customer';
+    const isSuperAdminAccount = normalized === SUPERADMIN_EMAIL;
+    const role: UserRole = isSuperAdminAccount ? 'superadmin' : 'customer';
 
     const newAccount: StoredAccount = {
       uid,
@@ -175,6 +143,7 @@ class LocalAuthAdapter implements AuthAdapter {
       name: input.name.trim(),
       hospital: input.hospital.trim() || 'Independent Clinic',
       role,
+      verified: isSuperAdminAccount,
       createdAt: now,
     };
 
@@ -188,6 +157,7 @@ class LocalAuthAdapter implements AuthAdapter {
       phone: '',
       hospital: newAccount.hospital,
       role,
+      verified: isSuperAdminAccount,
       createdAt: now,
     });
 
@@ -247,10 +217,14 @@ class RestAuthAdapter implements AuthAdapter {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Authentication failed.');
 
+    const normalizedUser: AuthUser = {
+      ...data.user,
+      role: resolveVerifiedRole(data.user?.email || email, data.user?.role),
+    };
     if (data.token) safeStorage.setItem(TOKEN_KEY, data.token);
-    safeStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
-    notifyAuthChange(data.user);
-    return { user: data.user };
+    safeStorage.setItem(SESSION_KEY, JSON.stringify(normalizedUser));
+    notifyAuthChange(normalizedUser);
+    return { user: normalizedUser };
   }
 
   async signUp(input: SignUpInput): Promise<{ user: AuthUser }> {
@@ -265,10 +239,14 @@ class RestAuthAdapter implements AuthAdapter {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Registration failed.');
 
+    const normalizedUser: AuthUser = {
+      ...data.user,
+      role: resolveVerifiedRole(data.user?.email || input.email, data.user?.role),
+    };
     if (data.token) safeStorage.setItem(TOKEN_KEY, data.token);
-    safeStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
-    notifyAuthChange(data.user);
-    return { user: data.user };
+    safeStorage.setItem(SESSION_KEY, JSON.stringify(normalizedUser));
+    notifyAuthChange(normalizedUser);
+    return { user: normalizedUser };
   }
 
   async signOut(): Promise<void> {

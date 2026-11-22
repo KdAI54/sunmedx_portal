@@ -729,7 +729,18 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
             <div className="min-w-0">
               <h1 className="font-syne font-black text-xl text-white tracking-widest flex items-center gap-2">
                 <span className="text-orange-500 font-extrabold pb-0.5">S</span>
-                <span>MEDX <span className="text-[10px] text-amber uppercase bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber/30">Admin</span></span>
+                <span>
+                  MEDX{' '}
+                  <span
+                    className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${
+                      isSuperAdmin
+                        ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
+                        : 'text-amber bg-amber-500/10 border-amber/30'
+                    }`}
+                  >
+                    {isSuperAdmin ? 'Super Admin ✓' : 'Admin'}
+                  </span>
+                </span>
               </h1>
               <p className="text-[10px] text-gray-500 font-mono mt-1 truncate">LOGGED: {adminEmail}</p>
             </div>
