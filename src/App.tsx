@@ -172,7 +172,7 @@ export default function App() {
   const [postAuthHash, setPostAuthHash] = useState<string>('');
 
   // Diagnostic Calculators States (Tools View)
-  const [calcTab, setCalcTab] = useState<'vent' | 'gas' | 'deviation'>('vent');
+  const [calcTab, setCalcTab] = useState<'vent' | 'gas' | 'deviation' | 'diagnose'>('vent');
   const [tidalVolume, setTidalVolume] = useState('450');
   const [respRate, setRespRate] = useState('14');
   const [psiPressure, setPsiPressure] = useState('1800');
@@ -180,6 +180,45 @@ export default function App() {
   const [gasFlowRate, setGasFlowRate] = useState('6');
   const [standardValue, setStandardValue] = useState('5.0');
   const [measuredValue, setMeasuredValue] = useState('5.08');
+
+  // Public AI Fault Diagnosis States (/api/diagnose)
+  const [diagEquipmentType, setDiagEquipmentType] = useState('Multi-Parameter ICU Patient Monitor');
+  const [diagProblemDesc, setDiagProblemDesc] = useState('');
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagError, setDiagError] = useState<string | null>(null);
+  const [diagResult, setDiagResult] = useState<{
+    causes: string[];
+    severity: string;
+    checks: string[];
+    recommendation: string;
+    onsiteRequired: boolean;
+  } | null>(null);
+
+  const handleRunPublicDiagnosis = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!diagEquipmentType.trim() || !diagProblemDesc.trim() || diagLoading) return;
+    setDiagLoading(true);
+    setDiagError(null);
+    try {
+      const res = await fetch('/api/diagnose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          equipmentType: diagEquipmentType.trim(),
+          problemDescription: diagProblemDesc.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || `Diagnosis request failed (${res.status})`);
+      }
+      setDiagResult(data);
+    } catch (err: any) {
+      setDiagError(err?.message || 'Unable to run AI fault diagnosis right now.');
+    } finally {
+      setDiagLoading(false);
+    }
+  };
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -629,6 +668,7 @@ export default function App() {
                   { id: 'vent', label: 'Ventilator Minute Volume' },
                   { id: 'gas', label: 'Gas Cylinder Duration' },
                   { id: 'deviation', label: 'NABL Deviation Check' },
+                  { id: 'diagnose', label: 'AI Fault Diagnosis' },
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -797,6 +837,110 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                )}
+
+                {calcTab === 'diagnose' && (
+                  <form onSubmit={handleRunPublicDiagnosis} className="space-y-4">
+                    <div className="space-y-1 border-b border-[#E6E7EE] pb-3">
+                      <h3 className="font-syne font-bold text-[#211D70] text-lg">AI Biomedical Fault Diagnosis</h3>
+                      <p className="text-xs text-[#505050]">
+                        Public equipment troubleshooting assistant powered securely through the portal&apos;s server AI proxy.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#211D70] mb-1.5">Equipment Type</label>
+                      <input
+                        type="text"
+                        required
+                        value={diagEquipmentType}
+                        onChange={e => setDiagEquipmentType(e.target.value)}
+                        placeholder="e.g. ICU Ventilator, Biphasic Defibrillator, Syringe Pump"
+                        className="w-full bg-white border border-[#D4D6E2] text-[#211D70] rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#F26522]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#211D70] mb-1.5">Fault Symptom / Error Code</label>
+                      <textarea
+                        rows={3}
+                        required
+                        value={diagProblemDesc}
+                        onChange={e => setDiagProblemDesc(e.target.value)}
+                        placeholder="Describe alarm message, sensor drift, SpO2 dropout, power fault, or pressure leak..."
+                        className="w-full bg-white border border-[#D4D6E2] text-[#211D70] rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#F26522]"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={diagLoading || !diagEquipmentType.trim() || !diagProblemDesc.trim()}
+                      className="w-full py-3 rounded-xl bg-[#211D70] hover:bg-[#272F78] text-[#F8C72E] font-syne font-bold text-xs uppercase tracking-wider disabled:opacity-50 transition-colors"
+                    >
+                      {diagLoading ? 'Analyzing Equipment Fault...' : 'Run AI Fault Diagnosis'}
+                    </button>
+
+                    {diagError && (
+                      <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-mono">
+                        {diagError}
+                      </div>
+                    )}
+
+                    {diagResult && (
+                      <div className="bg-[#EAEAEA]/60 border border-[#D4D6E2] rounded-xl p-4 space-y-3 text-xs text-[#211D70]">
+                        <div className="flex items-center justify-between border-b border-[#D4D6E2] pb-2">
+                          <span className="font-bold uppercase tracking-wide">Diagnostic Report</span>
+                          <span
+                            className={`px-2.5 py-0.5 rounded font-mono font-bold ${
+                              diagResult.severity === 'High'
+                                ? 'bg-rose-100 text-rose-800'
+                                : diagResult.severity === 'Medium'
+                                ? 'bg-amber-100 text-amber-900'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            Severity: {diagResult.severity}
+                          </span>
+                        </div>
+
+                        {Array.isArray(diagResult.causes) && diagResult.causes.length > 0 && (
+                          <div>
+                            <p className="font-bold mb-1">Probable Root Causes:</p>
+                            <ul className="list-disc list-inside space-y-0.5 text-[#404041]">
+                              {diagResult.causes.map((c, i) => (
+                                <li key={i}>{c}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {Array.isArray(diagResult.checks) && diagResult.checks.length > 0 && (
+                          <div>
+                            <p className="font-bold mb-1">Recommended Safety &amp; Inspection Checks:</p>
+                            <ul className="list-decimal list-inside space-y-0.5 text-[#404041]">
+                              {diagResult.checks.map((ch, i) => (
+                                <li key={i}>{ch}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <p className="text-[#404041] leading-relaxed">
+                          <strong className="text-[#211D70]">Resolution:</strong> {diagResult.recommendation}
+                        </p>
+
+                        {diagResult.onsiteRequired && (
+                          <button
+                            type="button"
+                            onClick={() => handleNavigateTo('#services')}
+                            className="w-full py-2.5 rounded-lg bg-[#EA2227] hover:bg-[#c81c20] text-white font-bold uppercase text-[11px] tracking-wider"
+                          >
+                            Onsite Engineer Recommended — Book Calibration / Repair
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </form>
                 )}
               </div>
             </div>

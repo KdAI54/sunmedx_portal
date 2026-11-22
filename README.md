@@ -48,8 +48,9 @@ git push -u origin main
 2. Select your GitHub repository and set:
    - **Build command**: `npm run build:cf`
    - **Build output directory**: `dist`
-3. Set environment variables in **Settings → Environment variables**:
-   - `GEMINI_API_KEY`: Gemini API key for `/api/diagnose` and `/api/suggest-quote`.
+   - **Deploy command** *(if prompted by Cloudflare)*: `npx wrangler pages deploy dist` (or leave blank for automatic Pages deployment — **never** use `npx wrangler deploy`, which fails with `Missing entry-point to Worker script or to assets directory` on Pages projects).
+3. Set environment variables in **Settings → Environment variables (Production & Preview)**:
+   - `GEMINI_API_KEY`: Server-side Gemini API key used by `/api/diagnose` (public), `/api/suggest-quote`, and `/api/admin-agent`. Visitors on your deployed portal automatically use AI via these server proxy routes without exposing the key in browser code, and any client deploying their own cloned portal attaches their own `GEMINI_API_KEY` in their Cloudflare Pages Environment variables.
    - `AUTH_SECRET`: Random secret string for signing auth tokens (when using `/api/auth/*`).
 
 ## Connecting an External Database & Auth Source via Environment Variables

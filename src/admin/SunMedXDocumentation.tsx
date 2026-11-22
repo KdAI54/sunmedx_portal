@@ -777,7 +777,7 @@ npx wrangler d1 execute sunmedx-db --remote --file=./schema.sql
                 <strong className="text-white">Step 3 — E-Catalogue Media:</strong> Use <span className="text-amber">E-Catalogue CRUD</span> or the <span className="text-amber">Biomedical AI Worker</span> to draft products and attach equipment photos via Browse or Camera.
               </li>
               <li className="bg-navy p-3 rounded-lg border border-white/5">
-                <strong className="text-white">Step 4 — Cloudflare Pages Settings:</strong> Build command <code className="text-sky-300">npm run build:cf</code>, output dir <code className="text-sky-300">dist</code>, Node 20+.
+                <strong className="text-white">Step 4 — Cloudflare Pages Settings:</strong> Build command <code className="text-sky-300">npm run build:cf</code>, output dir <code className="text-sky-300">dist</code>, deploy command <code className="text-sky-300">npx wrangler pages deploy dist</code> (never <code className="text-red-300">npx wrangler deploy</code>). Set <code className="text-amber">GEMINI_API_KEY</code> in Cloudflare Pages → Environment variables so public &amp; admin AI endpoints work safely via <code className="text-sky-300">/api/*</code>.
               </li>
             </ol>
           </div>

@@ -1,6 +1,11 @@
-name = "sunmedx"
+name = "sunmedx-portal"
 compatibility_date = "2025-01-01"
 pages_build_output_dir = "dist"
+
+# Cloudflare Pages Deployment:
+# Build command:  npm run build:cf
+# Output dir:     dist
+# Deploy command: npx wrangler pages deploy dist   (do NOT use `npx wrangler deploy`)
 
 # Optional: Uncomment after creating your Cloudflare D1 database
 # [[d1_databases]]
