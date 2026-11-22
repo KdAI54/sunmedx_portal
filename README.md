@@ -42,15 +42,15 @@ git remote add origin https://github.com/<your-org>/<your-repo>.git
 git push -u origin main
 ```
 
-## Cloudflare Pages Deployment
+## Cloudflare Deployment (Workers + Static Assets)
 
-1. Open **Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git**.
-2. Select your GitHub repository and set:
-   - **Build command**: `npm run build:cf`
-   - **Build output directory**: `dist`
-   - **Deploy command** *(if prompted by Cloudflare)*: `npx wrangler pages deploy dist` (or leave blank for automatic Pages deployment — **never** use `npx wrangler deploy`, which fails with `Missing entry-point to Worker script or to assets directory` on Pages projects).
-3. Set environment variables in **Settings → Environment variables (Production & Preview)**:
-   - `GEMINI_API_KEY`: Server-side Gemini API key used by `/api/diagnose` (public), `/api/suggest-quote`, and `/api/admin-agent`. Visitors on your deployed portal automatically use AI via these server proxy routes without exposing the key in browser code, and any client deploying their own cloned portal attaches their own `GEMINI_API_KEY` in their Cloudflare Pages Environment variables.
+The repository includes `worker.ts` + `wrangler.toml` configured for Cloudflare Workers with Static Assets (`./dist` + `/api/*` backend routes), so **`npx wrangler deploy`** works out of the box with both Cloudflare Git Builds and GitHub Actions:
+
+1. Connect your GitHub repository in **Cloudflare Dashboard → Workers & Pages** with:
+   - **Build command**: `npm run build:cf` (or `bun run build`)
+   - **Deploy command**: `npx wrangler deploy`
+2. Set environment secrets in **Cloudflare Dashboard → Settings → Variables and Secrets**:
+   - `GEMINI_API_KEY`: Server-side Gemini API key used by `/api/diagnose` (public), `/api/suggest-quote`, and `/api/admin-agent`. Visitors on your deployed portal automatically use AI via these server proxy routes without exposing the key in browser code, and any client deploying their own cloned portal attaches their own `GEMINI_API_KEY` in their Cloudflare Environment variables.
    - `AUTH_SECRET`: Random secret string for signing auth tokens (when using `/api/auth/*`).
 
 ## Connecting an External Database & Auth Source via Environment Variables

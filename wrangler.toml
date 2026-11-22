@@ -1,11 +1,12 @@
 name = "sunmedx-portal"
+main = "worker.ts"
 compatibility_date = "2025-01-01"
-pages_build_output_dir = "dist"
 
-# Cloudflare Pages Deployment:
-# Build command:  npm run build:cf
-# Output dir:     dist
-# Deploy command: npx wrangler pages deploy dist   (do NOT use `npx wrangler deploy`)
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
 
 # Optional: Uncomment after creating your Cloudflare D1 database
 # [[d1_databases]]
