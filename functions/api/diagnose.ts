@@ -48,20 +48,56 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
       }
     `;
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-        }),
-      }
-    );
+    const attempts = [
+      { model: 'gemini-4-hydrogen', delayMs: 0, thinkingLevel: 'LOW' },
+      { model: 'gemini-4-hydrogen', delayMs: 1200, thinkingLevel: 'LOW' },
+      { model: 'gemini-3.1-flash-lite', delayMs: 1800, thinkingLevel: 'MINIMAL' },
+    ];
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      return Response.json({ error: errText || 'Gemini API error' }, { status: 502 });
+    let geminiRes: Response | null = null;
+    let lastStatus = 502;
+    let lastErrText = '';
+
+    for (const attempt of attempts) {
+      if (attempt.delayMs > 0) {
+        await new Promise((r) => setTimeout(r, attempt.delayMs));
+      }
+      const attemptRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${attempt.model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'aistudio-build',
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
+            },
+          }),
+        }
+      );
+
+      if (attemptRes.ok) {
+        geminiRes = attemptRes;
+        break;
+      }
+
+      lastStatus = attemptRes.status;
+      lastErrText = await attemptRes.text();
+      if (attemptRes.status !== 429 && attemptRes.status !== 503 && attemptRes.status !== 404) {
+        break;
+      }
+    }
+
+    if (!geminiRes) {
+      const msg =
+        lastStatus === 429 || lastErrText.includes('RESOURCE_EXHAUSTED')
+          ? 'Gemini API quota or rate limit exceeded (429 RESOURCE_EXHAUSTED). Please wait a few seconds and retry, or check Settings > Secrets.'
+          : lastErrText || 'Gemini API error';
+      return Response.json({ error: msg, code: lastStatus }, { status: lastStatus >= 400 ? lastStatus : 502 });
     }
 
     const geminiJson = (await geminiRes.json()) as any;

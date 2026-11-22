@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, Type, GenerateContentParameters, GenerateContentResponse } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -28,6 +28,105 @@ function cleanJsonText(raw: string): string {
     cleaned = cleaned.substring(0, cleaned.length - 3);
   }
   return cleaned.trim();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseGeminiError(error: any): { status: number; message: string; isQuotaOrRateLimit: boolean } {
+  const rawMessage = String(error?.message || error || "");
+  const numericStatus = Number(error?.status || error?.code || 0);
+
+  const is429 =
+    numericStatus === 429 ||
+    rawMessage.includes('"code":429') ||
+    rawMessage.includes("RESOURCE_EXHAUSTED") ||
+    rawMessage.toLowerCase().includes("quota");
+
+  if (is429) {
+    return {
+      status: 429,
+      isQuotaOrRateLimit: true,
+      message:
+        "Gemini API quota or rate limit exceeded (429 RESOURCE_EXHAUSTED). Please wait a few seconds and retry, or check your Gemini API plan & billing key in Settings > Secrets.",
+    };
+  }
+
+  const isAuth =
+    numericStatus === 401 ||
+    numericStatus === 403 ||
+    rawMessage.includes("PERMISSION_DENIED") ||
+    rawMessage.includes("API_KEY_INVALID");
+
+  if (isAuth) {
+    return {
+      status: 403,
+      isQuotaOrRateLimit: false,
+      message:
+        "Gemini API key was rejected (403 PERMISSION_DENIED). Please verify GEMINI_API_KEY in Settings > Secrets.",
+    };
+  }
+
+  if (numericStatus === 404 || rawMessage.includes("NOT_FOUND")) {
+    return {
+      status: 404,
+      isQuotaOrRateLimit: false,
+      message: "Requested Gemini model is unavailable or unsupported.",
+    };
+  }
+
+  if (numericStatus === 503 || rawMessage.includes("UNAVAILABLE")) {
+    return {
+      status: 503,
+      isQuotaOrRateLimit: false,
+      message: "Gemini API is temporarily busy (503). Please retry shortly.",
+    };
+  }
+
+  return {
+    status: 500,
+    isQuotaOrRateLimit: false,
+    message: rawMessage || "Gemini AI request failed.",
+  };
+}
+
+async function generateWithResilience(
+  ai: GoogleGenAI,
+  params: Omit<GenerateContentParameters, "model">,
+  primaryModel: string = "gemini-4-hydrogen"
+): Promise<GenerateContentResponse> {
+  const attempts: Array<{ model: string; delayMs: number }> = [
+    { model: primaryModel, delayMs: 0 },
+    { model: primaryModel, delayMs: 1200 },
+    { model: "gemini-3.1-flash-lite", delayMs: 1800 },
+  ];
+
+  let lastError: any;
+  for (const attempt of attempts) {
+    if (attempt.delayMs > 0) {
+      await sleep(attempt.delayMs);
+    }
+    try {
+      const config = { ...(params.config || {}) };
+      if (attempt.model === "gemini-3.1-flash-lite" && config.thinkingConfig) {
+        config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+      }
+      return await ai.models.generateContent({
+        ...params,
+        model: attempt.model,
+        config,
+      });
+    } catch (err: any) {
+      lastError = err;
+      const parsed = parseGeminiError(err);
+      if (parsed.isQuotaOrRateLimit || parsed.status === 503 || parsed.status === 404) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
 }
 
 const SUNMEDX_SYSTEM_INSTRUCTION = `You are the SunMedX Biomedical AI Worker — an autonomous, specialist engineering and operations agent embedded inside the SunMedX Admin Studio.
@@ -86,11 +185,11 @@ async function startServer() {
       const fullPrompt = `${prompt.trim()}${contextSummary}`;
 
       if (mode === "research") {
-        const response = await ai.models.generateContent({
-          model: "gemini-4-hydrogen",
+        const response = await generateWithResilience(ai, {
           contents: `Perform live biomedical, regulatory, technical, or Indian hospital procurement research for SunMedX Admin on the following task. Organize findings clearly with practical engineering/business takeaways for SunMedX:\n\n${fullPrompt}`,
           config: {
             systemInstruction: SUNMEDX_SYSTEM_INSTRUCTION,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             tools: [{ googleSearch: {} }],
           },
         });
@@ -112,11 +211,11 @@ async function startServer() {
       }
 
       if (mode === "course_gen") {
-        const response = await ai.models.generateContent({
-          model: "gemini-4-hydrogen",
+        const response = await generateWithResilience(ai, {
           contents: `Design a complete SunMedX Academy training course ready to publish in the Academy Manager:\n\n${fullPrompt}`,
           config: {
             systemInstruction: SUNMEDX_SYSTEM_INSTRUCTION,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -159,11 +258,11 @@ async function startServer() {
       }
 
       if (mode === "tool_gen") {
-        const response = await ai.models.generateContent({
-          model: "gemini-4-hydrogen",
+        const response = await generateWithResilience(ai, {
           contents: `Design a clinical biomedical engineering tool or calculator for SunMedX sidebar deployment (categories: Critical Care, Pacing, Metrology, Gas Systems, Safety Audit, Diagnostics). Provide a FontAwesome 6 solid icon class (e.g. 'fa-solid fa-calculator', 'fa-solid fa-heart-pulse', 'fa-solid fa-lungs', 'fa-solid fa-bolt', 'fa-solid fa-gauge-high') and hex accent color:\n\n${fullPrompt}`,
           config: {
             systemInstruction: SUNMEDX_SYSTEM_INSTRUCTION,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -207,11 +306,11 @@ async function startServer() {
       }
 
       if (mode === "catalogue_gen") {
-        const response = await ai.models.generateContent({
-          model: "gemini-4-hydrogen",
+        const response = await generateWithResilience(ai, {
           contents: `Draft a complete SunMedX E-Catalogue equipment listing with Indian market INR pricing (use 0 for Price on Request), category ('Critical Care', 'Emergency', 'Accessories', 'Testing Tools', or 'General Care'), badge, clinical description, 4 concise feature bullets, HSN/SAC code, and matching studio asset ('monitor', 'defibrillator', 'ventilator', or 'analyzer'):\n\n${fullPrompt}`,
           config: {
             systemInstruction: SUNMEDX_SYSTEM_INSTRUCTION,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -243,11 +342,11 @@ async function startServer() {
 
       if (mode === "portal_clone") {
         const specText = portalSpec ? `\n\nCLIENT PORTAL SPECIFICATION:\n${JSON.stringify(portalSpec).slice(0, 2500)}` : "";
-        const response = await ai.models.generateContent({
-          model: "gemini-4-hydrogen",
+        const response = await generateWithResilience(ai, {
           contents: `You are cloning and tailoring a complete white-label biomedical / healthcare service portal modeled after SunMedX for a new client brand. Generate ONLY the requested selective features if specific modules are false, or the full suite if all are enabled. Provide valid hex colors (6 digits with #), INR pricing, realistic starter data, and Cloudflare deployment naming.\n\n${fullPrompt}${specText}`,
           config: {
             systemInstruction: SUNMEDX_SYSTEM_INSTRUCTION,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -392,11 +491,11 @@ async function startServer() {
       }
 
       // ops_worker
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
+      const response = await generateWithResilience(ai, {
         contents: `Execute this SunMedX administrative operations task (SOP drafting, RFQ pricing analysis, AMC proposal drafting, site announcement marquee, or Public FAQ Q&A synthesis). Return actionable output:\n\n${fullPrompt}`,
         config: {
           systemInstruction: SUNMEDX_SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -443,9 +542,16 @@ async function startServer() {
       const parsed = JSON.parse(cleanJsonText(response.text || "{}"));
       return res.json({ mode, ...parsed });
     } catch (error: any) {
-      console.error("Admin AI Worker error:", error);
-      return res.status(500).json({
-        error: error?.message || "Biomedical AI Worker failed executing task.",
+      const parsed = parseGeminiError(error);
+      if (parsed.isQuotaOrRateLimit) {
+        console.warn("[Admin AI Worker] Upstream Gemini 429 quota/rate limit:", parsed.message);
+      } else {
+        console.error("[Admin AI Worker] Error:", parsed.message);
+      }
+      return res.status(parsed.status).json({
+        error: parsed.message,
+        code: parsed.status,
+        retryable: parsed.isQuotaOrRateLimit || parsed.status === 503,
       });
     }
   });
@@ -485,16 +591,24 @@ async function startServer() {
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: prompt
+      const response = await generateWithResilience(ai, {
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: "application/json",
+        },
       });
 
-      const diagnosis = JSON.parse(cleanJsonText(response.text || ""));
+      const diagnosis = JSON.parse(cleanJsonText(response.text || "{}"));
       res.json(diagnosis);
     } catch (error: any) {
-      console.error("Diagnosis endpoint error:", error);
-      res.status(500).json({ error: error.message || "Failed running AI fault diagnosis simulator." });
+      const parsed = parseGeminiError(error);
+      if (parsed.isQuotaOrRateLimit) {
+        console.warn("[Diagnosis] Upstream Gemini 429 quota/rate limit:", parsed.message);
+      } else {
+        console.error("Diagnosis endpoint error:", parsed.message);
+      }
+      res.status(parsed.status).json({ error: parsed.message, code: parsed.status });
     }
   });
 
@@ -533,16 +647,24 @@ async function startServer() {
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: prompt
+      const response = await generateWithResilience(ai, {
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: "application/json",
+        },
       });
 
-      const quotation = JSON.parse(cleanJsonText(response.text || ""));
+      const quotation = JSON.parse(cleanJsonText(response.text || "{}"));
       res.json(quotation);
     } catch (error: any) {
-      console.error("Quotation AI endpoint error:", error);
-      res.status(500).json({ error: error.message || "Failed running AI quote simulator." });
+      const parsed = parseGeminiError(error);
+      if (parsed.isQuotaOrRateLimit) {
+        console.warn("[Quote AI] Upstream Gemini 429 quota/rate limit:", parsed.message);
+      } else {
+        console.error("Quotation AI endpoint error:", parsed.message);
+      }
+      res.status(parsed.status).json({ error: parsed.message, code: parsed.status });
     }
   });
 

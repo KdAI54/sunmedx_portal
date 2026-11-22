@@ -25,6 +25,30 @@ function cleanJsonText(raw: string): string {
     .trim();
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatUpstreamGeminiError(status: number, rawText: string): { status: number; message: string } {
+  if (status === 429 || rawText.includes('RESOURCE_EXHAUSTED') || rawText.toLowerCase().includes('quota')) {
+    return {
+      status: 429,
+      message:
+        'Gemini API quota or rate limit exceeded (429 RESOURCE_EXHAUSTED). Please wait a few seconds and retry, or check your Gemini API plan & billing key in Settings > Secrets.',
+    };
+  }
+  if (status === 401 || status === 403 || rawText.includes('PERMISSION_DENIED') || rawText.includes('API_KEY_INVALID')) {
+    return {
+      status: 403,
+      message: 'Gemini API key was rejected (403 PERMISSION_DENIED). Please verify GEMINI_API_KEY in Settings > Secrets.',
+    };
+  }
+  if (status === 404) {
+    return { status: 404, message: 'Requested Gemini model is unavailable or unsupported.' };
+  }
+  return { status: status >= 400 ? status : 502, message: rawText || 'Gemini API error' };
+}
+
 export async function onRequestPost({ request, env }: FunctionContext): Promise<Response> {
   try {
     const apiKey = env.GEMINI_API_KEY;
@@ -61,6 +85,11 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
       : '';
     const fullPrompt = `${body.prompt.trim()}${contextSummary}${specSummary}`;
 
+    const baseGenerationConfig: Record<string, unknown> =
+      body.mode === 'research'
+        ? { thinkingConfig: { thinkingLevel: 'LOW' } }
+        : { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'LOW' } };
+
     const generationPayload: Record<string, unknown> = {
       systemInstruction: { parts: [{ text: SUNMEDX_SYSTEM_INSTRUCTION }] },
       contents: [
@@ -84,29 +113,70 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
           ],
         },
       ],
+      generationConfig: baseGenerationConfig,
     };
 
     if (body.mode === 'research') {
       generationPayload.tools = [{ googleSearch: {} }];
-    } else {
-      generationPayload.generationConfig = { responseMimeType: 'application/json' };
     }
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'aistudio-build',
-        },
-        body: JSON.stringify(generationPayload),
-      }
-    );
+    const attempts = [
+      { model: 'gemini-4-hydrogen', delayMs: 0, thinkingLevel: 'LOW' },
+      { model: 'gemini-4-hydrogen', delayMs: 1200, thinkingLevel: 'LOW' },
+      { model: 'gemini-3.1-flash-lite', delayMs: 1800, thinkingLevel: 'MINIMAL' },
+    ];
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      return Response.json({ error: errText || 'Gemini API error' }, { status: 502 });
+    let geminiRes: Response | null = null;
+    let lastErrStatus = 502;
+    let lastErrText = '';
+
+    for (const attempt of attempts) {
+      if (attempt.delayMs > 0) {
+        await sleep(attempt.delayMs);
+      }
+
+      const payloadForAttempt = {
+        ...generationPayload,
+        generationConfig: {
+          ...baseGenerationConfig,
+          thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
+        },
+      };
+
+      const attemptRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${attempt.model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'aistudio-build',
+          },
+          body: JSON.stringify(payloadForAttempt),
+        }
+      );
+
+      if (attemptRes.ok) {
+        geminiRes = attemptRes;
+        break;
+      }
+
+      lastErrStatus = attemptRes.status;
+      lastErrText = await attemptRes.text();
+      if (attemptRes.status !== 429 && attemptRes.status !== 503 && attemptRes.status !== 404) {
+        break;
+      }
+    }
+
+    if (!geminiRes) {
+      const formatted = formatUpstreamGeminiError(lastErrStatus, lastErrText);
+      return Response.json(
+        {
+          error: formatted.message,
+          code: formatted.status,
+          retryable: formatted.status === 429 || formatted.status === 503,
+        },
+        { status: formatted.status }
+      );
     }
 
     const geminiJson = (await geminiRes.json()) as any;

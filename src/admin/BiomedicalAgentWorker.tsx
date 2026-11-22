@@ -169,6 +169,8 @@ export default function BiomedicalAgentWorker({
   const [prompt, setPrompt] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [lastTaskPrompt, setLastTaskPrompt] = useState<string | null>(null);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [runs, setRuns] = useState<WorkerRunItem[]>([]);
@@ -252,6 +254,8 @@ export default function BiomedicalAgentWorker({
 
     setIsRunning(true);
     setErrorMsg(null);
+    setErrorStatus(null);
+    setLastTaskPrompt(taskPrompt);
 
     try {
       const workspaceContext = {
@@ -296,6 +300,7 @@ export default function BiomedicalAgentWorker({
 
       const data = await res.json();
       if (!res.ok) {
+        setErrorStatus(res.status);
         throw new Error(data?.error || `Worker request failed (${res.status})`);
       }
 
@@ -650,12 +655,29 @@ export default function BiomedicalAgentWorker({
       )}
 
       {errorMsg && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl px-4 py-3 text-xs font-mono flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="min-w-0 flex-1">
-            <p className="font-bold">Worker Execution Error</p>
-            <p className="text-red-200/90 mt-0.5 break-words">{errorMsg}</p>
+        <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl px-4 py-3 text-xs font-mono flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2 min-w-0 flex-1">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="font-bold">
+                {errorStatus === 429
+                  ? 'Gemini API Rate Limit / Quota Reached (429)'
+                  : 'Worker Execution Error'}
+              </p>
+              <p className="text-red-200/90 mt-0.5 break-words">{errorMsg}</p>
+            </div>
           </div>
+          {lastTaskPrompt && (
+            <button
+              type="button"
+              disabled={isRunning}
+              onClick={() => executeWorkerTask(lastTaskPrompt)}
+              className="px-3 py-1.5 rounded-lg bg-amber/20 hover:bg-amber/30 border border-amber/40 text-amber font-bold text-[11px] flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRunning ? 'animate-spin' : ''}`} />
+              <span>Retry Task</span>
+            </button>
+          )}
         </div>
       )}
 

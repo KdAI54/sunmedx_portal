@@ -632,6 +632,76 @@ ${RELEASES.map((r) => `- **${r.version} — ${r.title}**: ${r.notes}`).join('\n'
           </div>
 
           <CodeSnippet id="env-template" title=".env Template (Copy to local .env — Never commit .env)" code={envTemplateBlock} />
+
+          {/* Step-by-Step Guide: How to Obtain Each Environment Variable */}
+          <div className="bg-[#10101e] border border-amber/20 rounded-xl p-4 sm:p-5 space-y-4">
+            <div>
+              <span className="text-[10px] font-mono uppercase text-amber font-bold tracking-wider">
+                Step-by-Step Walkthrough
+              </span>
+              <h4 className="font-syne font-bold text-white text-sm uppercase mt-0.5">
+                How to Obtain Each Required Environment Variable
+              </h4>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="bg-navy border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="font-mono font-bold text-amber">1. GEMINI_API_KEY (AI Worker, Diagnosis &amp; Quote AI)</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-300 leading-relaxed">
+                  <li>Open <strong>aistudio.google.com</strong> and sign in with your Google account.</li>
+                  <li>Click <strong>Get API key</strong> → <strong>Create API key</strong> and link a Google Cloud project.</li>
+                  <li>Copy the generated key string.</li>
+                  <li>Paste it into <strong>AI Studio Settings → Secrets</strong> (name: <code className="text-white">GEMINI_API_KEY</code>), your local <code className="text-white">.env</code>, and Cloudflare Pages Environment Variables.</li>
+                </ol>
+              </div>
+
+              <div className="bg-navy border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="font-mono font-bold text-amber">2. AUTH_SECRET (D1 Token Signing — Optional for Local Mode)</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-300 leading-relaxed">
+                  <li>Not issued by an external service — you generate your own high-entropy secret.</li>
+                  <li>Run in terminal: <code className="text-sky-300">openssl rand -hex 32</code> (or <code className="text-sky-300">node -e &quot;console.log(require(&apos;crypto&apos;).randomBytes(32).toString(&apos;hex&apos;))&quot;</code>).</li>
+                  <li>Save the output as <code className="text-white">AUTH_SECRET</code> in Cloudflare Pages Secrets whenever <code className="text-white">VITE_AUTH_ENDPOINT=/api/auth</code>.</li>
+                </ol>
+              </div>
+
+              <div className="bg-navy border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="font-mono font-bold text-amber">3. RAZORPAY_KEY_SECRET / STRIPE_SECRET_KEY / PAYMENT_WEBHOOK_SECRET</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-300 leading-relaxed">
+                  <li><strong>Razorpay:</strong> Log in to <strong>dashboard.razorpay.com</strong> → <strong>Account &amp; Settings</strong> → <strong>API Keys</strong> → Generate Test/Live Key. Put <em>Key ID</em> in Admin → Payment Gateway Setup, and <em>Key Secret</em> in <code className="text-white">RAZORPAY_KEY_SECRET</code>.</li>
+                  <li><strong>Stripe:</strong> Open <strong>dashboard.stripe.com</strong> → <strong>Developers → API keys</strong>. Put Publishable key in Payment Gateway Setup, and Secret key in <code className="text-white">STRIPE_SECRET_KEY</code>.</li>
+                  <li><strong>Webhooks:</strong> Add <code className="text-white">/api/payments/webhook</code> in your gateway Webhooks tab and copy its signing secret into <code className="text-white">PAYMENT_WEBHOOK_SECRET</code>.</li>
+                </ol>
+              </div>
+
+              <div className="bg-navy border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="font-mono font-bold text-amber">4. CLOUDFLARE_API_TOKEN &amp; CLOUDFLARE_ACCOUNT_ID (GitHub CI/CD)</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-300 leading-relaxed">
+                  <li>Log in to <strong>dash.cloudflare.com</strong> and copy your 32-character <strong>Account ID</strong> from the URL or <strong>Workers &amp; Pages → Overview</strong> right sidebar.</li>
+                  <li>Go to <strong>My Profile (top-right) → API Tokens → Create Token</strong>.</li>
+                  <li>Use the <strong>Edit Cloudflare Workers</strong> / Pages edit permission template and copy the token.</li>
+                  <li>Add both in GitHub Repo → <strong>Settings → Secrets and variables → Actions</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="bg-navy border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="font-mono font-bold text-amber">5. VITE_DATA_SOURCE, VITE_API_BASE_URL, VITE_AUTH_ENDPOINT &amp; APP_URL</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-300 leading-relaxed">
+                  <li>No third-party signup required — these select SunMedX&apos;s storage adapter.</li>
+                  <li><strong>Zero-setup default:</strong> Keep <code className="text-white">VITE_DATA_SOURCE=&quot;local&quot;</code>.</li>
+                  <li><strong>Cloudflare D1 mode:</strong> Set <code className="text-white">VITE_DATA_SOURCE=&quot;rest&quot;</code>, <code className="text-white">VITE_API_BASE_URL=&quot;/api&quot;</code>, <code className="text-white">VITE_AUTH_ENDPOINT=&quot;/api/auth&quot;</code>, and set <code className="text-white">APP_URL</code> to your live <code className="text-white">*.pages.dev</code> or custom domain.</li>
+                </ol>
+              </div>
+
+              <div className="bg-navy border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="font-mono font-bold text-amber">6. VITE_SUPABASE_URL &amp; VITE_SUPABASE_ANON_KEY (Optional Supabase)</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-300 leading-relaxed">
+                  <li>Only needed if using <code className="text-white">VITE_DATA_SOURCE=&quot;supabase&quot;</code> instead of Local or Cloudflare D1.</li>
+                  <li>Open <strong>supabase.com/dashboard</strong> → Select Project → <strong>Settings (gear) → API</strong>.</li>
+                  <li>Copy <strong>Project URL</strong> into <code className="text-white">VITE_SUPABASE_URL</code> and the <strong>anon / public</strong> key into <code className="text-white">VITE_SUPABASE_ANON_KEY</code>.</li>
+                </ol>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
