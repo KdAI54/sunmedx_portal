@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingBag, FileText, CheckCircle2, Phone, Briefcase, PlusCircle, CreditCard, Award, User, Layers, RefreshCw } from 'lucide-react';
+import { ShoppingBag, FileText, CheckCircle2, Phone, Briefcase, PlusCircle, CreditCard, Award, User, Layers, RefreshCw, Sparkles, Bot, Send } from 'lucide-react';
 import { getDb } from '../services/dataClient';
 import { PRODUCT_ASSET_FALLBACKS } from '../config/seed';
 import { getEffectiveGatewayConfig, isLiveGatewayKeyConfigured, launchRazorpayCheckout } from '../utils/paymentCheckout';
@@ -14,7 +14,7 @@ interface CustomerPortalProps {
 }
 
 export default function CustomerPortal({ userId, userEmail, siteSettings }: CustomerPortalProps) {
-  const [activeTab, setActiveTab] = useState<'orders' | 'quotes' | 'calibrations' | 'validations' | 'profile' | 'amc' | 'lifecycle'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'quotes' | 'calibrations' | 'validations' | 'profile' | 'amc' | 'lifecycle' | 'ai_assistant'>('orders');
   
   const [orders, setOrders] = useState<Order[]>([]);
   const [quotes, setQuotes] = useState<QuotationRequest[]>([]);
@@ -22,6 +22,26 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
   const [amcContracts, setAmcContracts] = useState<any[]>([]);
   const [lifecycles, setLifecycles] = useState<any[]>([]);
   const [techJobs, setTechJobs] = useState<any[]>([]);
+
+  // Client Hub AI Advisor & Fault Diagnostics state (backed by server-side GEMINI_API_KEY)
+  const [aiSubMode, setAiSubMode] = useState<'advisor' | 'fault'>('advisor');
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiEquipmentCtx, setAiEquipmentCtx] = useState('');
+  const [aiAnswer, setAiAnswer] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+
+  const [faultDevice, setFaultDevice] = useState('');
+  const [faultSymptom, setFaultSymptom] = useState('');
+  const [faultResult, setFaultResult] = useState<{
+    causes?: string[];
+    severity?: string;
+    checks?: string[];
+    recommendation?: string;
+    onsiteRequired?: boolean;
+  } | null>(null);
+  const [faultLoading, setFaultLoading] = useState(false);
+  const [faultError, setFaultError] = useState('');
   
   // Selected Tech Job Report Modal state
   const [viewedReportJob, setViewedReportJob] = useState<any | null>(null);
@@ -462,6 +482,7 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
             { id: 'amc', label: 'Active AMC Contracts', icon: Layers },
             { id: 'lifecycle', label: 'Equipment Lifecycles Log', icon: Award },
             { id: 'validations', label: 'Clinical Validation Suite', icon: Award },
+            { id: 'ai_assistant', label: 'AI Biomedical Hub', icon: Sparkles },
             { id: 'profile', label: 'My Profile Registration', icon: User }
           ].map((tab) => (
             <button
@@ -709,8 +730,35 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
                           <span className="text-orange-400">{contract.nextVisitDate}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>Value:</span>
-                          <span className="text-white">Rs {contract.annualValue?.toLocaleString()}</span>
+                          <span>Base Annual Value:</span>
+                          <span className="text-white tabular-nums">
+                            Rs {(contract.baseAnnualValue ?? contract.annualValue ?? 0).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>GST ({contract.gstPercent ?? (siteSettings?.gstPercent || 18)}%):</span>
+                          <span className="text-amber tabular-nums">
+                            Rs {(
+                              contract.gstAmount ??
+                              Math.round(
+                                (contract.baseAnnualValue ?? contract.annualValue ?? 0) *
+                                  ((contract.gstPercent ?? (siteSettings?.gstPercent || 18)) / 100)
+                              )
+                            ).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between font-bold">
+                          <span>Total (Incl. GST):</span>
+                          <span className="text-emerald-400 tabular-nums">
+                            Rs {(
+                              contract.totalWithGst ??
+                              (contract.baseAnnualValue ?? contract.annualValue ?? 0) +
+                                Math.round(
+                                  (contract.baseAnnualValue ?? contract.annualValue ?? 0) *
+                                    ((contract.gstPercent ?? (siteSettings?.gstPercent || 18)) / 100)
+                                )
+                            ).toLocaleString()}
+                          </span>
                         </div>
                         <p className="text-[10px] text-gray-500 font-sans mt-2">Covered: {contract.equipmentList}</p>
                       </div>
@@ -719,6 +767,11 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
                         <button
                           onClick={() => {
                             try {
+                              const baseVal = Number(contract.baseAnnualValue ?? contract.annualValue ?? 0);
+                              const gstPct = Number(contract.gstPercent ?? (siteSettings?.gstPercent || 18));
+                              const gstAmt = Number(contract.gstAmount ?? Math.round(baseVal * (gstPct / 100)));
+                              const grandVal = Number(contract.totalWithGst ?? (baseVal + gstAmt));
+
                               const doc = new jsPDF();
                               doc.setFillColor(26, 26, 46);
                               doc.rect(0, 0, 210, 42, 'F');
@@ -731,7 +784,7 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
                               doc.text("NABL ISO 17025 Calibrations & Hospital Asset Standards Verification Certificate", 15, 32);
 
                               doc.setFillColor(245, 245, 245);
-                              doc.rect(10, 50, 190, 60, 'F');
+                              doc.rect(10, 50, 190, 74, 'F');
                               doc.setTextColor(50, 50, 50);
                               doc.setFontSize(11);
                               doc.setFont('Helvetica', 'bold');
@@ -743,13 +796,16 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
                               doc.text(`Selected Scheme Plan: ${contract.planSelected}`, 15, 75);
                               doc.text(`Equipments List: ${contract.equipmentList}`, 15, 82);
                               doc.text(`Active Frame duration: ${contract.startDate} to ${contract.endDate}`, 15, 89);
-                              doc.text(`Annual Agreement Value: Rs ${contract.annualValue?.toLocaleString()}`, 15, 96);
-                              doc.text(`Next scheduled preventive: ${contract.nextVisitDate}`, 15, 103);
+                              doc.text(`Base Annual Value: Rs ${baseVal.toLocaleString()}  |  GST (${gstPct}%): Rs ${gstAmt.toLocaleString()}`, 15, 96);
+                              doc.setFont('Helvetica', 'bold');
+                              doc.text(`Total Agreement Value (Incl. GST): Rs ${grandVal.toLocaleString()}`, 15, 103);
+                              doc.setFont('Helvetica', 'normal');
+                              doc.text(`Next scheduled preventive: ${contract.nextVisitDate}`, 15, 110);
 
                               doc.setFont('Helvetica', 'bold');
-                              doc.text("COVERED CORE CLINICAL SERVICES & CHECKLISTS:", 15, 122);
+                              doc.text("COVERED CORE CLINICAL SERVICES & CHECKLISTS:", 15, 134);
                               doc.setFont('Helvetica', 'normal');
-                              let currentY = 130;
+                              let currentY = 142;
                               contract.coveredServices?.forEach((cs: string) => {
                                 doc.text(`* [Covered Check] ${cs}`, 20, currentY);
                                 currentY += 8;
@@ -836,6 +892,282 @@ export default function CustomerPortal({ userId, userEmail, siteSettings }: Cust
             </div>
             
             <ValidationSection userId={userId} userEmail={userEmail} />
+          </div>
+        )}
+
+        {/* AI BIOMEDICAL HUB TAB (Server-Side Gemini API Attached) */}
+        {activeTab === 'ai_assistant' && (
+          <div className="space-y-6 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div>
+                <h2 className="font-syne font-black text-lg text-white uppercase tracking-wider flex items-center gap-2">
+                  <Bot className="w-5 h-5 text-amber" />
+                  <span>Client Hub AI Biomedical Advisor &amp; Diagnostics</span>
+                </h2>
+                <p className="text-[11px] text-amber font-mono">
+                  Connected securely to SunMedX server AI endpoints (/api/client-ai &amp; /api/diagnose) using your attached Secrets key.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-[#10101e] p-1 rounded-xl border border-white/10 self-start">
+                <button
+                  type="button"
+                  onClick={() => setAiSubMode('advisor')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-colors ${
+                    aiSubMode === 'advisor' ? 'bg-amber text-navy' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  Calibration &amp; AMC Q&amp;A
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSubMode('fault')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-colors ${
+                    aiSubMode === 'fault' ? 'bg-amber text-navy' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  AI Fault Triage
+                </button>
+              </div>
+            </div>
+
+            {aiSubMode === 'advisor' ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!aiQuestion.trim()) return;
+                    setAiLoading(true);
+                    setAiError('');
+                    try {
+                      const res = await fetch('/api/client-ai', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          question: aiQuestion.trim(),
+                          equipmentContext: aiEquipmentCtx.trim(),
+                          hospitalName: amcContracts[0]?.hospitalName || userEmail,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'AI Advisor request failed.');
+                      setAiAnswer(data.answer || '');
+                    } catch (err: any) {
+                      setAiError(err?.message || 'Unable to contact Client Hub AI Advisor.');
+                    } finally {
+                      setAiLoading(false);
+                    }
+                  }}
+                  className="lg:col-span-5 bg-[#10101e] border border-white/10 rounded-2xl p-5 space-y-4 h-fit"
+                >
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">
+                      Select Registered Equipment / Context (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={aiEquipmentCtx}
+                      onChange={(e) => setAiEquipmentCtx(e.target.value)}
+                      placeholder="e.g. ICU Ventilator S-540, Defibrillator 200J check"
+                      className="w-full bg-navy border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                    />
+                    {lifecycles.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {lifecycles.slice(0, 3).map((lc) => (
+                          <button
+                            key={lc.id}
+                            type="button"
+                            onClick={() => setAiEquipmentCtx(`${lc.name} (${lc.model}) - ${lc.serialNumber}`)}
+                            className="px-2 py-1 rounded bg-white/5 hover:bg-amber/20 hover:text-amber text-[10px] font-mono text-gray-300 border border-white/10"
+                          >
+                            {lc.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">
+                      Ask SunMedX Biomedical AI *
+                    </label>
+                    <textarea
+                      rows={4}
+                      required
+                      value={aiQuestion}
+                      onChange={(e) => setAiQuestion(e.target.value)}
+                      placeholder="Ask about NABL calibration tolerances, IEC 60601 leakage thresholds, or preventive AMC prep..."
+                      className="w-full bg-navy border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={aiLoading || !aiQuestion.trim()}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-syne font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {aiLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <span>{aiLoading ? 'Generating Guidance...' : 'Ask Biomedical AI'}</span>
+                  </button>
+                </form>
+
+                <div className="lg:col-span-7 bg-[#10101e] border border-white/10 rounded-2xl p-5 min-h-[260px] flex flex-col justify-between space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                      <span className="text-[11px] font-mono uppercase text-amber font-bold">
+                        AI Engineering Guidance
+                      </span>
+                      <span className="text-[10px] font-mono text-gray-500">Server-Side Gemini Proxy</span>
+                    </div>
+
+                    {aiError && (
+                      <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 font-mono">
+                        {aiError}
+                      </div>
+                    )}
+
+                    {aiAnswer ? (
+                      <div className="text-xs sm:text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
+                        {aiAnswer}
+                      </div>
+                    ) : (
+                      <div className="py-10 text-center text-xs text-gray-400 space-y-2">
+                        <Bot className="w-10 h-10 text-amber/40 mx-auto" />
+                        <p>Ask any equipment maintenance, NABL deviation, or AMC readiness question to receive engineering guidance.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!faultDevice.trim() || !faultSymptom.trim()) return;
+                    setFaultLoading(true);
+                    setFaultError('');
+                    try {
+                      const res = await fetch('/api/diagnose', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          equipmentType: faultDevice.trim(),
+                          problemDescription: faultSymptom.trim(),
+                        }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Fault analysis failed.');
+                      setFaultResult(data);
+                    } catch (err: any) {
+                      setFaultError(err?.message || 'Unable to run equipment fault analysis.');
+                    } finally {
+                      setFaultLoading(false);
+                    }
+                  }}
+                  className="lg:col-span-5 bg-[#10101e] border border-white/10 rounded-2xl p-5 space-y-4 h-fit"
+                >
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">
+                      Equipment Model / Type *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={faultDevice}
+                      onChange={(e) => setFaultDevice(e.target.value)}
+                      placeholder="e.g. Biphasic Defibrillator, Multi-Para Monitor"
+                      className="w-full bg-navy border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">
+                      Observed Alarm / Fault Description *
+                    </label>
+                    <textarea
+                      rows={4}
+                      required
+                      value={faultSymptom}
+                      onChange={(e) => setFaultSymptom(e.target.value)}
+                      placeholder="Describe error codes, SpO2 waveform loss, battery charge failure, or pressure drift..."
+                      className="w-full bg-navy border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={faultLoading || !faultDevice.trim() || !faultSymptom.trim()}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-syne font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {faultLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    <span>{faultLoading ? 'Analyzing Fault...' : 'Run AI Fault Triage'}</span>
+                  </button>
+                </form>
+
+                <div className="lg:col-span-7 bg-[#10101e] border border-white/10 rounded-2xl p-5 space-y-4">
+                  {faultError && (
+                    <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 font-mono">
+                      {faultError}
+                    </div>
+                  )}
+
+                  {faultResult ? (
+                    <div className="space-y-4 text-xs text-gray-200">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                        <span className="font-syne font-bold uppercase text-white">Structured Fault Report</span>
+                        <span className="px-2.5 py-0.5 rounded bg-amber/15 text-amber border border-amber/30 font-mono font-bold">
+                          Severity: {faultResult.severity || 'Medium'}
+                        </span>
+                      </div>
+
+                      {Array.isArray(faultResult.causes) && faultResult.causes.length > 0 && (
+                        <div>
+                          <p className="font-bold text-amber mb-1">Probable Root Causes:</p>
+                          <ul className="list-disc list-inside space-y-1 text-gray-300">
+                            {faultResult.causes.map((c, i) => (
+                              <li key={i}>{c}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {Array.isArray(faultResult.checks) && faultResult.checks.length > 0 && (
+                        <div>
+                          <p className="font-bold text-amber mb-1">Safety &amp; Inspection Steps:</p>
+                          <ol className="list-decimal list-inside space-y-1 text-gray-300">
+                            {faultResult.checks.map((ch, i) => (
+                              <li key={i}>{ch}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+
+                      <p className="bg-navy/70 border border-white/10 rounded-xl p-3 leading-relaxed">
+                        <strong className="text-white">Recommended Action:</strong> {faultResult.recommendation}
+                      </p>
+
+                      {faultResult.onsiteRequired && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.location.hash = '#services';
+                          }}
+                          className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold uppercase text-[11px] tracking-wider"
+                        >
+                          Onsite Engineer Recommended — Schedule Dispatch
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-xs text-gray-400 space-y-2">
+                      <Sparkles className="w-10 h-10 text-amber/40 mx-auto" />
+                      <p>Submit an equipment symptom on the left to run AI biomedical triage.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

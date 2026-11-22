@@ -3,6 +3,8 @@ import { onRequestGet as paymentsStatusGet } from './functions/api/payments/stat
 import { onRequestPost as adminAgentPost } from './functions/api/admin-agent';
 import { onRequestPost as diagnosePost } from './functions/api/diagnose';
 import { onRequestPost as suggestQuotePost } from './functions/api/suggest-quote';
+import { onRequestPost as clientAiPost } from './functions/api/client-ai';
+import { onRequestPost as sendEmailPost } from './functions/api/send-email';
 import { onRequestPost as loginPost } from './functions/api/auth/login';
 import { onRequestPost as registerPost } from './functions/api/auth/register';
 import {
@@ -26,6 +28,8 @@ interface WorkerEnv {
   RAZORPAY_KEY_SECRET?: string;
   STRIPE_SECRET_KEY?: string;
   PAYMENT_WEBHOOK_SECRET?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
   VITE_DATA_SOURCE?: string;
   [key: string]: any;
 }
@@ -54,6 +58,14 @@ export default {
 
     if (pathname === '/api/suggest-quote' && method === 'POST') {
       return suggestQuotePost({ request, env });
+    }
+
+    if (pathname === '/api/client-ai' && method === 'POST') {
+      return clientAiPost({ request, env });
+    }
+
+    if (pathname === '/api/send-email' && method === 'POST') {
+      return sendEmailPost({ request, env });
     }
 
     if (pathname === '/api/auth/login' && method === 'POST') {

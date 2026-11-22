@@ -29,6 +29,7 @@ import AdminPanel from './admin/AdminPanel';
 import PublicEquipment from './pages/PublicEquipment';
 import TechnicianDashboard from './pages/TechnicianDashboard';
 import AuthPage from './pages/AuthPage';
+import LegalPolicies from './pages/LegalPolicies';
 import AIChatbot from './components/AIChatbot';
 
 // Cart Reducer definition
@@ -609,6 +610,25 @@ export default function App() {
 
         {currentHash === '#about' && <AboutContact />}
 
+        {(currentHash === '#privacy-policy' ||
+          currentHash === '#terms' ||
+          currentHash === '#refund-policy' ||
+          currentHash === '#calibration-policy') && (
+          <LegalPolicies
+            initialSection={
+              currentHash === '#terms'
+                ? 'terms'
+                : currentHash === '#refund-policy'
+                ? 'refund'
+                : currentHash === '#calibration-policy'
+                ? 'calibration'
+                : 'privacy'
+            }
+            siteSettings={siteSettings}
+            onNavigate={handleNavigateTo}
+          />
+        )}
+
         {/* AUTH PROTECTED CUSTOMER PORTAL (Dark Operational Console Wrapper) */}
         {currentHash === '#customer-portal' && userEmail && (
           <div className="bg-[#0B1120] text-slate-100 min-h-[75vh] py-4">
@@ -999,14 +1019,17 @@ export default function App() {
               <button onClick={() => handleNavigateTo('#tools')} className="hover:text-[#F8C72E] transition-colors">
                 Calculators
               </button>
-              <button
-                onClick={() => {
-                  setPostAuthHash('#admin');
-                  handleNavigateTo('#auth');
-                }}
-                className="text-[#F8C72E] hover:underline transition-colors"
-              >
-                Admin Portal
+              <button onClick={() => handleNavigateTo('#privacy-policy')} className="hover:text-[#F8C72E] transition-colors">
+                Privacy Policy
+              </button>
+              <button onClick={() => handleNavigateTo('#terms')} className="hover:text-[#F8C72E] transition-colors">
+                Terms &amp; Conditions
+              </button>
+              <button onClick={() => handleNavigateTo('#refund-policy')} className="hover:text-[#F8C72E] transition-colors">
+                Refund Policy
+              </button>
+              <button onClick={() => handleNavigateTo('#calibration-policy')} className="hover:text-[#F8C72E] transition-colors">
+                Warranty &amp; NABL
               </button>
             </div>
           </div>

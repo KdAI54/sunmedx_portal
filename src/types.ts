@@ -25,6 +25,7 @@ export interface Product {
   description: string;
   image: string;
   features: string[];
+  hsnSac?: string;
 }
 
 export interface Tool {
@@ -147,6 +148,13 @@ export interface SiteSettings {
   paymentGateway?: PaymentGatewayConfig;
   // CMS Styling Settings
   logoUrl?: string;
+  socialAccounts?: {
+    linkedin?: string;
+    instagram?: string;
+    x?: string;
+    whatsappChannel?: string;
+    youtube?: string;
+  };
   themeVariables: {
     colorNavy: string;
     colorCrimson: string;
@@ -302,6 +310,7 @@ export interface AMCPlan {
   responseTime: string;
   visitFrequency: string;
   annualPrice: number;
+  gstPercent?: number;
 }
 
 export interface AMCRequest {
@@ -337,6 +346,12 @@ export interface AMCContract {
   endDate: string;
   nextVisitDate: string;
   annualValue: number;
+  baseAnnualValue?: number;
+  gstPercent?: number;
+  gstAmount?: number;
+  totalWithGst?: number;
+  lastEmailedAt?: string;
+  notes?: string;
   status: 'Active' | 'Expired';
   signatureUrl?: string; // base64 customer sign
   createdAt: string;
@@ -431,3 +446,37 @@ export interface EquipmentLifecycle {
     cost: number;
   }[];
 }
+
+export interface EmailCampaign {
+  id?: string;
+  name: string;
+  category: string;
+  segment: 'all_users' | 'rfq_leads' | 'amc_holders' | 'service_contacts' | 'custom';
+  subject: string;
+  preheader?: string;
+  body: string;
+  ctaLabel?: string;
+  ctaHash?: string;
+  recipients: string[];
+  recipientCount: number;
+  status: 'Draft' | 'Sent' | 'Prepared';
+  deliveryProvider?: string;
+  sentAt?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface SocialPost {
+  id?: string;
+  platform: 'LinkedIn' | 'Instagram' | 'X' | 'WhatsApp Channel' | 'YouTube';
+  title: string;
+  caption: string;
+  hashtags: string;
+  mediaUrl?: string;
+  linkedItem?: string;
+  scheduledFor?: string;
+  status: 'Draft' | 'Scheduled' | 'Published';
+  createdBy: string;
+  createdAt: string;
+}
+

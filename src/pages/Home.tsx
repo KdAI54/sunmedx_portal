@@ -896,6 +896,53 @@ export default function Home({ onNavigate, siteSettings }: HomeProps) {
           </div>
         </div>
       </section>
+
+      {/* 11. POLICIES, TERMS & REGULATORY COMPLIANCE LINKS */}
+      <section className="bg-[#F5F6FA] border-t border-[#E2E4EC] py-8 px-6">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="text-center md:text-left">
+            <h3 className="font-syne font-bold text-sm text-[#211D70]">
+              Policies, Terms &amp; Regulatory Disclosures
+            </h3>
+            <p className="text-xs text-[#505050]">
+              Review SunMedX privacy terms, hospital service agreements, refund policy &amp; ISO/IEC 17025 calibration scope.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-4 text-xs font-bold text-[#211D70]">
+            <button
+              type="button"
+              onClick={() => onNavigate('#privacy-policy')}
+              className="hover:text-[#EA2227] underline underline-offset-4 transition-colors"
+            >
+              Privacy Policy
+            </button>
+            <span aria-hidden="true" className="text-[#505050]/40">·</span>
+            <button
+              type="button"
+              onClick={() => onNavigate('#terms')}
+              className="hover:text-[#EA2227] underline underline-offset-4 transition-colors"
+            >
+              Terms &amp; Conditions
+            </button>
+            <span aria-hidden="true" className="text-[#505050]/40">·</span>
+            <button
+              type="button"
+              onClick={() => onNavigate('#refund-policy')}
+              className="hover:text-[#EA2227] underline underline-offset-4 transition-colors"
+            >
+              Refund &amp; Cancellation
+            </button>
+            <span aria-hidden="true" className="text-[#505050]/40">·</span>
+            <button
+              type="button"
+              onClick={() => onNavigate('#calibration-policy')}
+              className="hover:text-[#EA2227] underline underline-offset-4 transition-colors"
+            >
+              Calibration &amp; Warranty
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

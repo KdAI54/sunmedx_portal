@@ -668,6 +668,119 @@ async function startServer() {
     }
   });
 
+  // API Route - Client Hub Biomedical AI Advisor
+  app.post("/api/client-ai", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({
+          error: "GEMINI_API_KEY environment variable is required on the server. Configure it in Settings > Secrets.",
+        });
+      }
+
+      const { question, equipmentContext, hospitalName } = req.body || {};
+      if (typeof question !== "string" || !question.trim() || question.length > 2500) {
+        return res.status(400).json({ error: "Please provide a valid clinical or calibration question (1–2500 characters)." });
+      }
+
+      const ai = createGeminiClient(apiKey);
+      const prompt = `You are the SunMedX Client Hub Biomedical AI Advisor assisting verified hospital clinicians and biomedical engineers in India.
+Answer clearly, accurately, and concisely with NABL ISO/IEC 17025 and IEC 60601 safety context where relevant. Do not provide human clinical diagnosis—focus strictly on medical device calibration, preventive maintenance, AMC coverage, and analyzer troubleshooting.
+
+${hospitalName ? `Hospital / Organization: ${hospitalName}\n` : ""}${equipmentContext ? `Equipment / Asset Context: ${equipmentContext}\n` : ""}Client Question: ${question.trim()}`;
+
+      const response = await generateWithResilience(ai, {
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      });
+
+      return res.json({ answer: response.text || "No response generated." });
+    } catch (error: any) {
+      const parsed = parseGeminiError(error);
+      return res.status(parsed.status).json({ error: parsed.message, code: parsed.status });
+    }
+  });
+
+  // API Route - Direct Transactional & Campaign Email Dispatch (with mailto fallback when relay key is unset)
+  app.post("/api/send-email", async (req, res) => {
+    try {
+      const { to, subject, text, html, replyTo } = req.body || {};
+      const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+      const rawRecipients: string[] = Array.isArray(to)
+        ? to
+        : typeof to === "string"
+        ? to.split(",")
+        : [];
+      const recipients = Array.from(
+        new Set(rawRecipients.map((e) => String(e).trim()).filter((e) => isValidEmail(e)))
+      );
+
+      if (recipients.length === 0) {
+        return res.status(400).json({ error: "Provide at least one valid recipient email address." });
+      }
+
+      const cleanSubject = String(subject || "").trim();
+      const cleanText = String(text || "").trim();
+      if (!cleanSubject || (!cleanText && !html)) {
+        return res.status(400).json({ error: "Email subject and message content are required." });
+      }
+
+      const mailtoUrl = `mailto:${encodeURIComponent(recipients[0])}?subject=${encodeURIComponent(
+        cleanSubject
+      )}&body=${encodeURIComponent(cleanText.slice(0, 1800))}`;
+
+      const resendKey = process.env.RESEND_API_KEY?.trim();
+      if (!resendKey) {
+        return res.json({
+          sent: false,
+          provider: "mailto_fallback",
+          recipients,
+          mailtoUrl,
+          message:
+            "Server email relay (RESEND_API_KEY) is not configured yet. Use the prepared mailto draft or configure RESEND_API_KEY in Settings > Secrets.",
+        });
+      }
+
+      const fromAddress = process.env.EMAIL_FROM?.trim() || "SunMedX Biomedical <onboarding@resend.dev>";
+      const resendRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: recipients,
+          subject: cleanSubject,
+          text: cleanText || undefined,
+          html: html || undefined,
+          reply_to: replyTo && isValidEmail(String(replyTo)) ? String(replyTo).trim() : undefined,
+        }),
+      });
+
+      const resendJson: any = await resendRes.json().catch(() => ({}));
+      if (!resendRes.ok) {
+        return res.status(resendRes.status >= 400 ? resendRes.status : 502).json({
+          sent: false,
+          error: resendJson?.message || "Upstream email delivery failed.",
+          mailtoUrl,
+        });
+      }
+
+      return res.json({
+        sent: true,
+        provider: "resend",
+        id: resendJson?.id || null,
+        recipients,
+        mailtoUrl,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Failed preparing or sending email." });
+    }
+  });
+
   // Serve static files / Vite middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

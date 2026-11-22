@@ -3,7 +3,8 @@ import { jsPDF } from 'jspdf';
 import {
   BarChart2, ShieldAlert, Users, ShoppingBag, ClipboardList, BookOpen, BookOpenText, Wrench, Settings, Play,
   MessageSquare, Plus, Edit, Trash2, Check, RefreshCw, Eye, Send, FileText, ArrowRight, Palette,
-  ExternalLink, ArrowDownToLine, PlusCircle, AlertCircle, RefreshCcw, LogOut, CreditCard, Receipt, Menu, X, Bot, Sparkles
+  ExternalLink, ArrowDownToLine, PlusCircle, AlertCircle, RefreshCcw, LogOut, CreditCard, Receipt, Menu, X, Bot, Sparkles,
+  Mail, Megaphone, Search, Copy
 } from 'lucide-react';
 import { getDb } from '../services/dataClient';
 import { PRODUCT_ASSET_FALLBACKS } from '../config/seed';
@@ -13,6 +14,7 @@ import QuoteInvoiceGenerator from './QuoteInvoiceGenerator';
 import PaymentGatewaySetup from './PaymentGatewaySetup';
 import BiomedicalAgentWorker from './BiomedicalAgentWorker';
 import SunMedXDocumentation from './SunMedXDocumentation';
+import MarketingSocialManager from './MarketingSocialManager';
 import {
   Product, Course, Tool, ChatbotQA, ServiceRequest, QuotationRequest,
   Order, Message, ChangeLog, SiteSettings, UserProfile
@@ -28,7 +30,7 @@ interface AdminPanelProps {
 type AdminSection =
   | 'overview' | 'ai_worker' | 'users' | 'catalogue' | 'quotations' | 'orders' | 'invoice_generator' | 'payment_gateway' | 'services'
   | 'messages' | 'academy' | 'validation' | 'tools' | 'chatbot' | 'announcements'
-  | 'billing' | 'cms' | 'changelog' | 'amc_manager' | 'saas_telemetry' | 'advanced_analytics' | 'documentation' | 'platform_manager';
+  | 'billing' | 'cms' | 'changelog' | 'amc_manager' | 'marketing_social' | 'saas_telemetry' | 'advanced_analytics' | 'documentation' | 'platform_manager';
 
 export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdateSettings }: AdminPanelProps) {
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');
@@ -215,7 +217,19 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
     }
   };
 
-  // AMC AGREEMENTS CONSOLE STATES
+  // AMC PLAN TIERS & AGREEMENTS CONSOLE STATES
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [planForm, setPlanForm] = useState({
+    name: '',
+    annualPrice: 25000,
+    gstPercent: siteSettings?.gstPercent ?? 18,
+    responseTime: 'Under 4 Hours',
+    visitFrequency: 'Quarterly preventive audits + emergency support',
+    equipmentTypes: 'Patient Monitors, Defibrillators, Ventilators',
+    coveredServices: 'NABL reference calibration, IEC 60601 safety audit, Certificate PDF',
+  });
+
   const [showContractModal, setShowContractModal] = useState(false);
   const [amcForm, setAmcForm] = useState({
     contractNumber: '',
@@ -225,21 +239,151 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
     email: '',
     equipmentList: '',
     city: 'Mumbai',
-    planSelected: 'Platinum Advanced Care',
-    annualValue: 120000,
+    planSelected: 'Premium ICU Plan',
+    annualValue: 28999,
+    gstPercent: siteSettings?.gstPercent ?? 18,
     notes: '',
     startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
-    nextVisitDate: new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0]
+    endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    nextVisitDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
-  const createAmcContract = async (e: React.FormEvent) => {
+  const [emailModalContract, setEmailModalContract] = useState<any | null>(null);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [amcNotice, setAmcNotice] = useState<{ type: 'success' | 'info' | 'error'; text: string; mailtoUrl?: string } | null>(null);
+
+  const buildAmcEmailDraft = (contract: any) => {
+    const baseVal = Number(contract.baseAnnualValue ?? contract.annualValue ?? 0);
+    const gstPct = Number(contract.gstPercent ?? siteSettings?.gstPercent ?? 18);
+    const gstAmt = Number(contract.gstAmount ?? Math.round(baseVal * (gstPct / 100)));
+    const totalVal = Number(contract.totalWithGst ?? (baseVal + gstAmt));
+
+    return {
+      to: contract.email || contract.userEmail || '',
+      subject: `SunMedX AMC Agreement ${contract.contractNumber} — ${contract.hospitalName}`,
+      body: `Dear ${contract.contactPerson || 'Biomedical Team'},\n\nPlease find your registered Annual Maintenance Agreement summary with SunMedX Biomedical:\n\n• Agreement No: ${contract.contractNumber}\n• Hospital / Clinic: ${contract.hospitalName} (${contract.city || 'Mumbai'})\n• Selected Plan: ${contract.planSelected}\n• Covered Equipment: ${contract.equipmentList}\n• Contract Period: ${contract.startDate} to ${contract.endDate}\n• Next Preventive Visit: ${contract.nextVisitDate}\n\nCommercial Breakdown (INR):\n• Base Annual Fee: Rs ${baseVal.toLocaleString()}\n• GST (${gstPct}%): Rs ${gstAmt.toLocaleString()}\n• Total Payable (Incl. GST): Rs ${totalVal.toLocaleString()}\n\nYou may download the signed NABL-aligned AMC Certificate PDF anytime from your SunMedX Client Hub.\n\nWarm regards,\nSunMedX Biomedical Engineering Desk\n${siteSettings?.phone || '+91 98765 43210'} | ${siteSettings?.email || 'info@sunmedx.in'}`,
+    };
+  };
+
+  const openEmailContractModal = (contract: any) => {
+    const draft = buildAmcEmailDraft(contract);
+    setEmailModalContract(contract);
+    setEmailTo(draft.to);
+    setEmailSubject(draft.subject);
+    setEmailBody(draft.body);
+    setAmcNotice(null);
+  };
+
+  const dispatchContractEmail = async (contractObj: any, to: string, subject: string, bodyText: string) => {
+    setEmailSending(true);
+    setAmcNotice(null);
+    try {
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to,
+          subject,
+          text: bodyText,
+          replyTo: siteSettings?.email || adminEmail,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed dispatching AMC agreement email.');
+      }
+
+      const db = getDb();
+      if (contractObj?.id) {
+        await db.collection('amc_contracts').doc(contractObj.id).update({
+          lastEmailedAt: new Date().toISOString(),
+        });
+      }
+
+      if (data.sent) {
+        await logAdminAction('AMC_EMAIL_SENT', `Sent AMC agreement ${contractObj.contractNumber} directly to ${to}`);
+        setAmcNotice({ type: 'success', text: `AMC Agreement ${contractObj.contractNumber} emailed directly to ${to}.` });
+        setEmailModalContract(null);
+      } else {
+        await logAdminAction('AMC_EMAIL_PREPARED', `Prepared AMC agreement email ${contractObj.contractNumber} for ${to}`);
+        setAmcNotice({
+          type: 'info',
+          text: data.message || 'Server email relay key is not configured yet—use "Open Mail App" below.',
+          mailtoUrl: data.mailtoUrl,
+        });
+      }
+    } catch (err: any) {
+      setAmcNotice({ type: 'error', text: err?.message || 'Unable to send AMC email.' });
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
+  const saveAmcPlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planForm.name.trim()) return;
+    try {
+      const db = getDb();
+      const payload = {
+        name: planForm.name.trim(),
+        annualPrice: Number(planForm.annualPrice) || 0,
+        gstPercent: Number(planForm.gstPercent) || 0,
+        responseTime: planForm.responseTime.trim(),
+        visitFrequency: planForm.visitFrequency.trim(),
+        equipmentTypes: planForm.equipmentTypes.split(',').map((s) => s.trim()).filter(Boolean),
+        coveredServices: planForm.coveredServices.split(',').map((s) => s.trim()).filter(Boolean),
+      };
+      if (editingPlanId) {
+        await db.collection('amc_plans').doc(editingPlanId).update(payload);
+        await logAdminAction('AMC_PLAN_UPDATE', `Updated AMC Plan "${payload.name}" (GST ${payload.gstPercent}%)`);
+        setAmcNotice({ type: 'success', text: `AMC Plan "${payload.name}" updated.` });
+      } else {
+        await db.collection('amc_plans').add(payload);
+        await logAdminAction('AMC_PLAN_CREATE', `Created AMC Plan "${payload.name}" (GST ${payload.gstPercent}%)`);
+        setAmcNotice({ type: 'success', text: `AMC Plan "${payload.name}" added.` });
+      }
+      setShowPlanModal(false);
+      setEditingPlanId(null);
+    } catch (err: any) {
+      setAmcNotice({ type: 'error', text: err?.message || 'Failed saving AMC plan.' });
+    }
+  };
+
+  const deleteAmcPlan = async (id: string, name: string) => {
+    try {
+      const db = getDb();
+      await db.collection('amc_plans').doc(id).delete();
+      await logAdminAction('AMC_PLAN_DELETE', `Deleted AMC Plan "${name}"`);
+      setAmcNotice({ type: 'info', text: `Removed AMC Plan "${name}".` });
+    } catch (err: any) {
+      setAmcNotice({ type: 'error', text: err?.message || 'Failed removing AMC plan.' });
+    }
+  };
+
+  const createAmcContract = async (e: React.FormEvent, sendEmailImmediately = false) => {
     e.preventDefault();
     try {
       const db = getDb();
       const num = amcForm.contractNumber || `AMC-${Math.floor(10000 + Math.random() * 90000)}`;
-      
-      await db.collection('amc_contracts').add({
+      const baseVal = Number(amcForm.annualValue) || 0;
+      const gstPct = Number(amcForm.gstPercent) || 0;
+      const gstAmt = Math.round(baseVal * (gstPct / 100));
+      const totalWithGst = baseVal + gstAmt;
+
+      const matchedPlan = amcPlans.find((p) => p.name === amcForm.planSelected);
+      const coveredList =
+        matchedPlan?.coveredServices?.length > 0
+          ? matchedPlan.coveredServices
+          : [
+              'Yearly hardware stress testing',
+              'NABL reference calibration scans',
+              'End-Of-Life safety alignment inspections',
+            ];
+
+      const contractPayload = {
         contractNumber: num,
         hospitalName: amcForm.hospitalName,
         contactPerson: amcForm.contactPerson,
@@ -249,22 +393,34 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
         equipmentList: amcForm.equipmentList,
         city: amcForm.city,
         planSelected: amcForm.planSelected,
-        annualValue: Number(amcForm.annualValue),
+        baseAnnualValue: baseVal,
+        gstPercent: gstPct,
+        gstAmount: gstAmt,
+        totalWithGst,
+        annualValue: baseVal,
         notes: amcForm.notes,
         startDate: amcForm.startDate,
         endDate: amcForm.endDate,
         nextVisitDate: amcForm.nextVisitDate,
-        coveredServices: [
-          "Yearly hardware stress testing",
-          "NABL reference calibration scans",
-          "End-Of-Life safety alignment inspections"
-        ],
+        coveredServices: coveredList,
+        status: 'Active',
         createdAt: new Date().toISOString()
-      });
+      };
 
-      await logAdminAction("AMC_CONTRACT_CREATE", `Registered annual contract ${num} for ${amcForm.hospitalName}`);
-      alert(`AMC Agreement Contract ${num} registered successfully into the database ledger!`);
+      const createdRef = await db.collection('amc_contracts').add(contractPayload);
+      await logAdminAction('AMC_CONTRACT_CREATE', `Registered annual contract ${num} for ${amcForm.hospitalName} (Total Incl. GST Rs ${totalWithGst.toLocaleString()})`);
       setShowContractModal(false);
+
+      if (sendEmailImmediately && amcForm.email.trim()) {
+        const draft = buildAmcEmailDraft({ ...contractPayload, id: createdRef.id });
+        await dispatchContractEmail({ ...contractPayload, id: createdRef.id }, draft.to, draft.subject, draft.body);
+      } else {
+        setAmcNotice({
+          type: 'success',
+          text: `AMC Agreement ${num} saved (Total Incl. GST: Rs ${totalWithGst.toLocaleString()}).`,
+        });
+      }
+
       setAmcForm({
         contractNumber: '',
         hospitalName: '',
@@ -273,15 +429,16 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
         email: '',
         equipmentList: '',
         city: 'Mumbai',
-        planSelected: 'Platinum Advanced Care',
-        annualValue: 120000,
+        planSelected: amcPlans[0]?.name || 'Premium ICU Plan',
+        annualValue: amcPlans[0]?.annualPrice || 28999,
+        gstPercent: amcPlans[0]?.gstPercent ?? siteSettings?.gstPercent ?? 18,
         notes: '',
         startDate: new Date().toISOString().split('T')[0],
-        endDate: new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
-        nextVisitDate: new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0]
+        endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        nextVisitDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       });
     } catch (err: any) {
-      alert("Error registering agreement: " + err.message);
+      setAmcNotice({ type: 'error', text: 'Error registering agreement: ' + err.message });
     }
   };
 
@@ -330,50 +487,112 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
   };
 
   // CRUD FOR CATALOGUE
-  const [prodForm, setProdForm] = useState<Partial<Product>>({ name: '', price: 0, category: 'Critical Care', badge: '', description: '', features: [], image: '' });
+  const [prodForm, setProdForm] = useState<Partial<Product>>({
+    name: '',
+    price: 0,
+    category: 'Critical Care',
+    badge: '',
+    hsnSac: '9018',
+    description: '',
+    features: [],
+    image: '',
+  });
   const [editingProdId, setEditingProdId] = useState<string | null>(null);
   const [featureInput, setFeatureInput] = useState('');
+  const [showProdModal, setShowProdModal] = useState(false);
+  const [catSearchQuery, setCatSearchQuery] = useState('');
+  const [catFilterCategory, setCatFilterCategory] = useState('All');
+  const [catNotice, setCatNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const openNewProductModal = () => {
+    setEditingProdId(null);
+    setProdForm({
+      name: '',
+      price: 0,
+      category: 'Critical Care',
+      badge: '',
+      hsnSac: '9018',
+      description: '',
+      features: [],
+      image: '',
+    });
+    setFeatureInput('');
+    setCatNotice(null);
+    setShowProdModal(true);
+  };
+
+  const openEditProductModal = (p: Product, asDuplicate = false) => {
+    setEditingProdId(asDuplicate ? null : p.id || null);
+    setProdForm({
+      name: asDuplicate ? `${p.name} (Copy)` : p.name,
+      price: p.price ?? 0,
+      category: p.category || 'Critical Care',
+      badge: p.badge || '',
+      hsnSac: p.hsnSac || '9018',
+      description: p.description || '',
+      features: p.features || [],
+      image: p.image || '',
+    });
+    setFeatureInput(p.features?.join(', ') || '');
+    setCatNotice(null);
+    setShowProdModal(true);
+  };
 
   const saveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prodForm.name) return;
+    if (!prodForm.name?.trim()) return;
     setLoadingAction('products');
+    setCatNotice(null);
     try {
       const db = getDb();
       const payload = {
-        name: prodForm.name,
-        price: prodForm.price === 0 ? null : Number(prodForm.price), // 0 means Price on request
+        name: prodForm.name.trim(),
+        price: !prodForm.price || Number(prodForm.price) === 0 ? null : Number(prodForm.price),
         category: prodForm.category || 'Critical Care',
         badge: prodForm.badge || '',
+        hsnSac: prodForm.hsnSac || '9018',
         description: prodForm.description || '',
         image: prodForm.image || PRODUCT_ASSET_FALLBACKS.analyzer,
-        features: prodForm.features || []
+        features: prodForm.features || [],
       };
 
       if (editingProdId) {
         await db.collection('products').doc(editingProdId).update(payload);
-        await logAdminAction("PRODUCT_UPDATE", `Admin updated product '${payload.name}'`);
+        await logAdminAction('PRODUCT_UPDATE', `Admin updated product '${payload.name}'`);
+        setCatNotice({ type: 'success', text: `Updated "${payload.name}" in E-Catalogue.` });
       } else {
         await db.collection('products').add(payload);
-        await logAdminAction("PRODUCT_CREATE", `Admin added catalogue product '${payload.name}'`);
+        await logAdminAction('PRODUCT_CREATE', `Admin added catalogue product '${payload.name}'`);
+        setCatNotice({ type: 'success', text: `Added "${payload.name}" to E-Catalogue.` });
       }
-      setProdForm({ name: '', price: 0, category: 'Critical Care', badge: '', description: '', features: [], image: '' });
+      setProdForm({
+        name: '',
+        price: 0,
+        category: 'Critical Care',
+        badge: '',
+        hsnSac: '9018',
+        description: '',
+        features: [],
+        image: '',
+      });
+      setFeatureInput('');
       setEditingProdId(null);
+      setShowProdModal(false);
     } catch (err: any) {
-      alert("Error: " + err.message);
+      setCatNotice({ type: 'error', text: 'Error saving equipment: ' + err.message });
     } finally {
       setLoadingAction(null);
     }
   };
 
   const deleteProduct = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete ${name}?`)) return;
     try {
       const db = getDb();
       await db.collection('products').doc(id).delete();
-      await logAdminAction("PRODUCT_DELETE", `Admin deleted catalogue product '${name}'`);
+      await logAdminAction('PRODUCT_DELETE', `Admin deleted catalogue product '${name}'`);
+      setCatNotice({ type: 'success', text: `Removed "${name}" from E-Catalogue.` });
     } catch (err: any) {
-      alert("Delete blocked: " + err.message);
+      setCatNotice({ type: 'error', text: 'Delete blocked: ' + err.message });
     }
   };
 
@@ -763,6 +982,7 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                 { id: 'payment_gateway', label: 'Payment Gateway Setup', icon: CreditCard },
                 { id: 'services', label: `Service Jobs & Dispatch (${pendingServiceCount})`, icon: Wrench, highlight: pendingServiceCount > 0 },
                 { id: 'amc_manager', label: `AMC Plans & Agreements`, icon: ShieldAlert },
+                { id: 'marketing_social', label: 'Email & Social Manager', icon: Megaphone },
                 { id: 'saas_telemetry', label: 'WhatsApp & Live Translations', icon: MessageSquare },
                 { id: 'advanced_analytics', label: 'SaaS Advanced Metrics', icon: BarChart2 },
                 { id: 'messages', label: 'Inbox Messages', icon: MessageSquare },
@@ -934,195 +1154,372 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
           </div>
         )}
 
-        {/* CATALOGUE CRUD */}
+        {/* CATALOGUE CRUD (Managed Workspace + Clean Modal Editor Window) */}
         {activeSection === 'catalogue' && (
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 animate-fadeIn">
-            {/* Create/Edit Form */}
-            <div className="xl:col-span-5 bg-navy rounded-2xl border border-white/5 p-4 sm:p-6 shadow-xl h-fit">
-              <h3 className="font-syne font-black text-sm text-amber uppercase tracking-wider mb-4">
-                {editingProdId ? 'Modify Equipment Profile' : 'Register Catalogue Equipment'}
-              </h3>
-              <form onSubmit={saveProduct} className="space-y-4">
+          <div className="space-y-6 animate-fadeIn">
+            {/* Top Workspace Header & Controls */}
+            <div className="bg-navy border border-white/10 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">Equipment Name *</label>
+                  <h2 className="font-syne font-black text-xl text-white uppercase tracking-wider">
+                    E-Catalogue Equipment Manager ({catalogue.length})
+                  </h2>
+                  <p className="text-xs text-amber font-mono">
+                    Search, filter, attach device photos (Browse / Take Photo / Live Camera), and manage INR / RFQ pricing
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={openNewProductModal}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-syne font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shrink-0 shadow-md"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Add New Equipment</span>
+                </button>
+              </div>
+
+              {catNotice && (
+                <div
+                  className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
+                    catNotice.type === 'success'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                      : 'bg-red-500/10 border-red-500/30 text-red-300'
+                  }`}
+                >
+                  <span>{catNotice.text}</span>
+                  <button type="button" onClick={() => setCatNotice(null)} className="text-xs underline ml-3">
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Search + Category Filter Bar */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2 border-t border-white/5">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    required
-                    value={prodForm.name}
-                    onChange={(e) => setProdForm(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-3 text-xs text-white"
+                    value={catSearchQuery}
+                    onChange={(e) => setCatSearchQuery(e.target.value)}
+                    placeholder="Search equipment by name, badge, or category..."
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">Price (Rupees / 0=RFQ)</label>
-                    <input
-                      type="number"
-                      value={prodForm.price || ''}
-                      onChange={(e) => setProdForm(prev => ({ ...prev, price: Number(e.target.value) }))}
-                      className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-3 text-xs text-white font-mono"
-                    />
+                <div className="flex flex-wrap gap-1.5">
+                  {['All', 'Critical Care', 'Emergency', 'Accessories', 'Testing Tools', 'General Care'].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCatFilterCategory(cat)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors ${
+                        catFilterCategory === cat
+                          ? 'bg-amber text-navy border-amber font-bold'
+                          : 'bg-[#10101e] border-white/10 text-gray-300 hover:bg-white/5'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Full-Width Managed Catalogue Table */}
+            <div className="bg-navy border border-white/10 rounded-2xl p-4 sm:p-6 shadow-xl">
+              {(() => {
+                const filteredCatalogue = catalogue.filter((p) => {
+                  const matchesCat = catFilterCategory === 'All' || p.category === catFilterCategory;
+                  const q = catSearchQuery.trim().toLowerCase();
+                  const matchesQuery =
+                    !q ||
+                    p.name.toLowerCase().includes(q) ||
+                    (p.category || '').toLowerCase().includes(q) ||
+                    (p.badge || '').toLowerCase().includes(q);
+                  return matchesCat && matchesQuery;
+                });
+
+                if (filteredCatalogue.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-xs text-gray-400 space-y-3">
+                      <ShoppingBag className="w-10 h-10 text-amber/40 mx-auto" />
+                      <p>No equipment matches your current filter.</p>
+                      <button
+                        type="button"
+                        onClick={openNewProductModal}
+                        className="px-4 py-2 rounded-lg bg-amber text-navy font-bold text-xs"
+                      >
+                        + Add Equipment Listing
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto border border-white/5 bg-[#10101e] rounded-xl">
+                    <table className="w-full text-xs text-left divide-y divide-white/5 text-gray-300">
+                      <thead>
+                        <tr className="bg-navy text-gray-400 font-mono">
+                          <th className="p-3.5 sm:p-4">Equipment Info</th>
+                          <th className="p-3.5 sm:p-4">Category</th>
+                          <th className="p-3.5 sm:p-4 hidden md:table-cell">HSN/SAC</th>
+                          <th className="p-3.5 sm:p-4 font-bold">Price</th>
+                          <th className="p-3.5 sm:p-4 font-bold text-center hidden sm:table-cell">Specs</th>
+                          <th className="p-3.5 sm:p-4 font-bold text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {filteredCatalogue.map((p) => (
+                          <tr key={p.id} className="hover:bg-white/5">
+                            <td className="p-3.5 sm:p-4">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={p.image || PRODUCT_ASSET_FALLBACKS.analyzer}
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).src = PRODUCT_ASSET_FALLBACKS.analyzer;
+                                  }}
+                                  className="w-12 h-12 object-cover rounded-lg border border-white/10 shrink-0"
+                                  alt={p.name}
+                                />
+                                <div className="min-w-0">
+                                  <div className="font-syne font-bold text-white text-xs sm:text-sm">{p.name}</div>
+                                  <div className="text-[11px] text-gray-400 truncate max-w-[260px]">
+                                    {p.badge ? `${p.badge} · ` : ''}
+                                    {p.description || 'Clinical biomedical device'}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3.5 sm:p-4 text-amber font-semibold font-mono whitespace-nowrap">{p.category}</td>
+                            <td className="p-3.5 sm:p-4 font-mono text-gray-400 hidden md:table-cell tabular-nums">
+                              {p.hsnSac || '9018'}
+                            </td>
+                            <td className="p-3.5 sm:p-4 font-mono font-bold text-white whitespace-nowrap tabular-nums">
+                              {p.price ? `Rs ${p.price.toLocaleString()}` : 'Price on Request'}
+                            </td>
+                            <td className="p-3.5 sm:p-4 text-center text-gray-400 hidden sm:table-cell tabular-nums">
+                              {p.features?.length || 0} specs
+                            </td>
+                            <td className="p-3.5 sm:p-4 text-right whitespace-nowrap">
+                              <div className="flex justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditProductModal(p, false)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-amber/15 hover:bg-amber hover:text-navy text-amber font-semibold text-[11px] inline-flex items-center gap-1 transition-colors"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditProductModal(p, true)}
+                                  title="Duplicate product"
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteProduct(p.id!, p.name)}
+                                  aria-label={`Delete ${p.name}`}
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">Feature Sticker</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Hot Seller"
-                      value={prodForm.badge}
-                      onChange={(e) => setProdForm(prev => ({ ...prev, badge: e.target.value }))}
-                      className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-3 text-xs text-white"
-                    />
+                );
+              })()}
+            </div>
+
+            {/* Dedicated Equipment Editor Modal Window (Properly Sized, Scroll-Safe Header/Body/Footer) */}
+            {showProdModal && (
+              <div className="fixed inset-0 z-[2400] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+                <form
+                  onSubmit={saveProduct}
+                  className="bg-[#111124] w-full max-w-3xl max-h-[92vh] rounded-2xl border border-amber/30 shadow-2xl flex flex-col overflow-hidden"
+                >
+                  {/* Sticky Modal Header */}
+                  <div className="p-4 sm:p-5 bg-navy border-b border-white/10 flex items-center justify-between gap-3 shrink-0">
+                    <div>
+                      <span className="text-[10px] font-mono text-amber uppercase font-bold tracking-wider">
+                        E-Catalogue CRUD Editor
+                      </span>
+                      <h3 className="font-syne font-black text-base sm:text-lg text-white uppercase">
+                        {editingProdId ? 'Modify Equipment Profile' : 'Register Catalogue Equipment'}
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowProdModal(false)}
+                      className="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 flex items-center justify-center"
+                      aria-label="Close equipment window"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">Category Group</label>
-                  <select
-                    value={prodForm.category}
-                    onChange={(e) => setProdForm(prev => ({ ...prev, category: e.target.value }))}
-                    className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-3 text-xs text-white"
-                  >
-                    {['Critical Care', 'Emergency', 'Accessories', 'Testing Tools', 'General Care'].map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
+                  {/* Scrollable Form Body */}
+                  <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                          Equipment Name *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. 5-Para ICU Patient Monitor"
+                          value={prodForm.name}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, name: e.target.value }))}
+                          className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white"
+                        />
+                      </div>
 
-                <ImageAttachmentField
-                  value={prodForm.image || ''}
-                  onChange={(url) => setProdForm(prev => ({ ...prev, image: url }))}
-                  label="Equipment Image Attachment"
-                />
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                          Price (INR / 0 = Price on Request)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={prodForm.price ?? ''}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, price: Number(e.target.value) }))}
+                          className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
+                        />
+                      </div>
 
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">Product Description</label>
-                  <textarea
-                    rows={3}
-                    value={prodForm.description}
-                    onChange={(e) => setProdForm(prev => ({ ...prev, description: e.target.value }))}
-                    className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-3 text-xs text-white focus:outline-none"
-                  />
-                </div>
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                          Category Group
+                        </label>
+                        <select
+                          value={prodForm.category}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, category: e.target.value }))}
+                          className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white"
+                        >
+                          {['Critical Care', 'Emergency', 'Accessories', 'Testing Tools', 'General Care'].map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                {/* Features compiler input */}
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">Spec Features List (Comma separated)</label>
-                  <input
-                    type="text"
-                    placeholder="12.1 inch screen, 7-lead ECG analysis, Auto power..."
-                    value={featureInput}
-                    onChange={(e) => {
-                      setFeatureInput(e.target.value);
-                      setProdForm(prev => ({ ...prev, features: e.target.value.split(',').map(f => f.trim()).filter(Boolean) }));
-                    }}
-                    className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-3 text-xs text-white"
-                  />
-                </div>
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                          Feature Badge
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. NABL Certified / Bestseller"
+                          value={prodForm.badge || ''}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, badge: e.target.value }))}
+                          className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white"
+                        />
+                      </div>
 
-                <div className="flex gap-2 pt-3">
-                  {editingProdId && (
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                          HSN / SAC Code
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="9018"
+                          value={prodForm.hsnSac || ''}
+                          onChange={(e) => setProdForm((prev) => ({ ...prev, hsnSac: e.target.value }))}
+                          className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <ImageAttachmentField
+                      value={prodForm.image || ''}
+                      onChange={(url) => setProdForm((prev) => ({ ...prev, image: url }))}
+                      label="Equipment Image Attachment (Browse / Take Photo / Camera / URL)"
+                    />
+
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                        Product Clinical Description
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={prodForm.description || ''}
+                        onChange={(e) => setProdForm((prev) => ({ ...prev, description: e.target.value }))}
+                        className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-gray-300 font-bold mb-1">
+                        Specification Features (Comma separated)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="12.1 inch screen, 7-lead ECG analysis, NABL traceable..."
+                        value={featureInput}
+                        onChange={(e) => {
+                          setFeatureInput(e.target.value);
+                          setProdForm((prev) => ({
+                            ...prev,
+                            features: e.target.value
+                              .split(',')
+                              .map((f) => f.trim())
+                              .filter(Boolean),
+                          }));
+                        }}
+                        className="w-full bg-[#10101e] border border-orange-500/20 rounded-xl px-4 py-2.5 text-xs text-white"
+                      />
+                      {prodForm.features && prodForm.features.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {prodForm.features.map((feat, idx) => (
+                            <span
+                              key={idx}
+                              className="text-[11px] font-mono text-amber bg-amber/10 border border-amber/20 px-2 py-0.5 rounded"
+                            >
+                              {feat}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Sticky Modal Footer */}
+                  <div className="p-4 sm:p-5 bg-navy border-t border-white/10 flex flex-wrap justify-end gap-3 shrink-0">
                     <button
                       type="button"
                       onClick={() => {
+                        setShowProdModal(false);
                         setEditingProdId(null);
-                        setProdForm({ name: '', price: 0, category: 'Critical Care', badge: '', description: '', features: [], image: '' });
-                        setFeatureInput('');
                       }}
-                      className="flex-1 py-3 px-4 rounded-xl border border-white/10 text-xs text-gray-300 capitalize hover:bg-white/5"
+                      className="px-5 py-2.5 rounded-xl border border-white/15 text-xs font-bold text-gray-300 hover:bg-white/5"
                     >
                       Cancel
                     </button>
-                  )}
-                  <button
-                    type="submit"
-                    disabled={loadingAction === 'products'}
-                    className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-bold uppercase text-xs font-syne tracking-wider flex items-center justify-center gap-1.5"
-                  >
-                    {loadingAction === 'products' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                    <span>{editingProdId ? 'Update' : 'Register'}</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            {/* List Table */}
-            <div className="xl:col-span-7 bg-navy border border-white/5 rounded-2xl p-4 sm:p-6 shadow-xl min-w-0">
-              <h3 className="font-syne font-black text-sm text-gray-300 uppercase tracking-widest mb-4">
-                Equipment Catalogue List ({catalogue.length})
-              </h3>
-              <div className="overflow-x-auto border border-white/5 bg-[#10101e] rounded-xl">
-                <table className="w-full text-xs text-left divide-y divide-white/5 text-gray-300">
-                  <thead>
-                    <tr className="bg-navy text-gray-400 font-mono">
-                      <th className="p-3 sm:p-4">Equipment Info</th>
-                      <th className="p-3 sm:p-4">Category</th>
-                      <th className="p-3 sm:p-4 font-bold">Price</th>
-                      <th className="p-3 sm:p-4 font-bold text-center hidden sm:table-cell">Specs</th>
-                      <th className="p-3 sm:p-4 font-bold text-right text-gray-400">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {catalogue.map((p) => (
-                      <tr key={p.id} className="hover:bg-white/5">
-                        <td className="p-3 sm:p-4">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={p.image || PRODUCT_ASSET_FALLBACKS.analyzer}
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).src = PRODUCT_ASSET_FALLBACKS.analyzer;
-                              }}
-                              className="w-11 h-11 object-cover rounded-lg border border-white/10 shrink-0"
-                              alt={p.name}
-                            />
-                            <div className="min-w-0">
-                              <div className="font-syne font-bold text-white text-xs sm:text-sm">{p.name}</div>
-                              {p.badge && (
-                                <span className="inline-block bg-crimson/15 text-amber text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border border-amber/20 mt-1">
-                                  {p.badge}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-3 sm:p-4 text-amber font-semibold font-mono whitespace-nowrap">{p.category}</td>
-                        <td className="p-3 sm:p-4 font-mono font-bold text-white whitespace-nowrap tabular-nums">
-                          {p.price ? `Rs ${p.price.toLocaleString()}` : 'RFQ'}
-                        </td>
-                        <td className="p-3 sm:p-4 text-center text-gray-400 hidden sm:table-cell">
-                          {p.features?.length || 0}
-                        </td>
-                        <td className="p-3 sm:p-4 text-right whitespace-nowrap">
-                          <div className="flex justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingProdId(p.id!);
-                                setProdForm(p);
-                                setFeatureInput(p.features?.join(', ') || '');
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
-                              }}
-                              aria-label={`Edit ${p.name}`}
-                              className="p-1.5 rounded bg-white/5 text-amber hover:text-white"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteProduct(p.id!, p.name)}
-                              aria-label={`Delete ${p.name}`}
-                              className="p-1.5 rounded bg-white/5 text-gray-400 hover:text-red-400"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    <button
+                      type="submit"
+                      disabled={loadingAction === 'products'}
+                      className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-syne font-black uppercase text-xs tracking-wider flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {loadingAction === 'products' ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4" />
+                      )}
+                      <span>{editingProdId ? 'Update Equipment' : 'Save Equipment'}</span>
+                    </button>
+                  </div>
+                </form>
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -1962,33 +2359,163 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
           <div className="space-y-8 animate-fadeIn">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <h2 className="font-syne font-black text-xl text-white uppercase tracking-wider">Annual Maintenance Schemes (AMC) Manager</h2>
-                <p className="text-xs text-amber font-mono">Process incoming calibration ticket requests and audit hospital level agreements</p>
+                <h2 className="font-syne font-black text-xl text-white uppercase tracking-wider">Annual Maintenance Plans &amp; Agreements (AMC)</h2>
+                <p className="text-xs text-amber font-mono">Manage AMC tier pricing with GST rate calculations and direct client agreement emailing</p>
               </div>
-              <button
-                onClick={() => {
-                  setAmcForm({
-                    contractNumber: `AMC-${Math.floor(10000 + Math.random() * 90000)}`,
-                    hospitalName: '',
-                    contactPerson: '',
-                    phone: '',
-                    email: '',
-                    equipmentList: '',
-                    city: 'Mumbai',
-                    planSelected: 'Platinum Advanced Care',
-                    annualValue: 125000,
-                    notes: '',
-                    startDate: new Date().toISOString().split('T')[0],
-                    endDate: new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
-                    nextVisitDate: new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0]
-                  });
-                  setShowContractModal(true);
-                }}
-                className="px-4 py-2 bg-gradient-to-r from-crimson to-amber hover:opacity-95 text-navy font-black text-xs uppercase rounded-xl tracking-wider font-syne flex items-center gap-1.5"
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingPlanId(null);
+                    setPlanForm({
+                      name: '',
+                      annualPrice: 25000,
+                      gstPercent: siteSettings?.gstPercent ?? 18,
+                      responseTime: 'Under 4 Hours',
+                      visitFrequency: 'Quarterly preventive audits + emergency support',
+                      equipmentTypes: 'Patient Monitors, Defibrillators, Ventilators',
+                      coveredServices: 'NABL reference calibration, IEC 60601 safety audit, Certificate PDF',
+                    });
+                    setShowPlanModal(true);
+                  }}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-amber/30 text-amber font-bold text-xs uppercase rounded-xl tracking-wider font-syne flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add AMC Plan</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const defaultPlan = amcPlans[0];
+                    setAmcForm({
+                      contractNumber: `AMC-${Math.floor(10000 + Math.random() * 90000)}`,
+                      hospitalName: '',
+                      contactPerson: '',
+                      phone: '',
+                      email: '',
+                      equipmentList: '',
+                      city: 'Mumbai',
+                      planSelected: defaultPlan?.name || 'Premium ICU Plan',
+                      annualValue: defaultPlan?.annualPrice || 28999,
+                      gstPercent: defaultPlan?.gstPercent ?? siteSettings?.gstPercent ?? 18,
+                      notes: '',
+                      startDate: new Date().toISOString().split('T')[0],
+                      endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                      nextVisitDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                    });
+                    setShowContractModal(true);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-crimson to-amber hover:opacity-95 text-navy font-black text-xs uppercase rounded-xl tracking-wider font-syne flex items-center gap-1.5"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Initialize AMC Contract</span>
+                </button>
+              </div>
+            </div>
+
+            {amcNotice && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-3 ${
+                  amcNotice.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : amcNotice.type === 'error'
+                    ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                    : 'bg-amber/10 border-amber/30 text-amber'
+                }`}
               >
-                <PlusCircle className="w-4 h-4" />
-                <span>Initialize AMC Contract</span>
-              </button>
+                <span>{amcNotice.text}</span>
+                {amcNotice.mailtoUrl && (
+                  <a
+                    href={amcNotice.mailtoUrl}
+                    className="px-3 py-1.5 rounded-lg bg-amber text-navy font-bold text-[11px] inline-flex items-center gap-1.5"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Open Mail App</span>
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* AMC Plans with GST Rate Breakdown */}
+            <div className="bg-navy border border-white/5 rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10px] text-amber font-mono uppercase font-bold tracking-wider">Standardized AMC Tiers</span>
+                  <h3 className="font-syne font-bold text-white text-sm uppercase">AMC Plans &amp; GST Tax Schedule</h3>
+                </div>
+                <span className="text-xs font-mono text-gray-400">{amcPlans.length} active plan(s)</span>
+              </div>
+
+              {amcPlans.length === 0 ? (
+                <p className="text-xs font-mono text-gray-400 py-4">No AMC plans configured yet. Click &ldquo;Add AMC Plan&rdquo; to create your first tier.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {amcPlans.map((plan) => {
+                    const base = Number(plan.annualPrice || 0);
+                    const gstPct = Number(plan.gstPercent ?? siteSettings?.gstPercent ?? 18);
+                    const gstAmt = Math.round(base * (gstPct / 100));
+                    const total = base + gstAmt;
+
+                    return (
+                      <div key={plan.id} className="bg-[#10101e] border border-white/10 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="font-syne font-bold text-white text-sm">{plan.name}</h4>
+                            <span className="text-[11px] font-mono text-amber font-bold shrink-0">GST {gstPct}%</span>
+                          </div>
+                          <p className="text-[11px] font-mono text-gray-400">
+                            {plan.responseTime} · {plan.visitFrequency}
+                          </p>
+                          <div className="bg-navy/70 border border-white/5 rounded-lg p-2.5 text-xs font-mono space-y-1">
+                            <div className="flex justify-between text-gray-300">
+                              <span>Base Fee:</span>
+                              <span className="tabular-nums">Rs {base.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-amber">
+                              <span>GST ({gstPct}%):</span>
+                              <span className="tabular-nums">Rs {gstAmt.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-emerald-400 font-bold border-t border-white/5 pt-1">
+                              <span>Total Incl. GST:</span>
+                              <span className="tabular-nums">Rs {total.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPlanId(plan.id);
+                              setPlanForm({
+                                name: plan.name || '',
+                                annualPrice: Number(plan.annualPrice || 0),
+                                gstPercent: Number(plan.gstPercent ?? siteSettings?.gstPercent ?? 18),
+                                responseTime: plan.responseTime || '',
+                                visitFrequency: plan.visitFrequency || '',
+                                equipmentTypes: Array.isArray(plan.equipmentTypes) ? plan.equipmentTypes.join(', ') : '',
+                                coveredServices: Array.isArray(plan.coveredServices) ? plan.coveredServices.join(', ') : '',
+                              });
+                              setShowPlanModal(true);
+                            }}
+                            className="text-[11px] font-mono text-amber hover:underline flex items-center gap-1"
+                          >
+                            <Edit className="w-3 h-3" />
+                            <span>Edit Plan</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteAmcPlan(plan.id, plan.name)}
+                            className="text-[11px] font-mono text-gray-400 hover:text-red-400"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* List incoming amc requests */}
@@ -2006,7 +2533,7 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                     <thead>
                       <tr className="bg-navy text-gray-400 font-mono py-3">
                         <th className="p-4">Hospital station</th>
-                        <th className="p-4">Plan & Equipment details</th>
+                        <th className="p-4">Plan &amp; Equipment details</th>
                         <th className="p-4">Liaison Contact Info</th>
                         <th className="p-4 text-right">Operational Wizard</th>
                       </tr>
@@ -2026,20 +2553,22 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                           <td className="p-4 text-right">
                             <button
                               onClick={() => {
+                                const matchedPlan = amcPlans.find((p) => p.name === req.planSelected);
                                 setAmcForm({
                                   contractNumber: `AMC-${Math.floor(10000 + Math.random() * 90000)}`,
                                   hospitalName: req.hospitalName || '',
                                   contactPerson: req.contactPerson || '',
                                   phone: req.phone || '',
-                                  email: req.email || '',
+                                  email: req.email || req.userEmail || '',
                                   equipmentList: req.equipmentList || '',
                                   city: req.city || 'Mumbai',
-                                  planSelected: req.planSelected || 'Platinum Advanced Care',
-                                  annualValue: 120000,
+                                  planSelected: req.planSelected || matchedPlan?.name || 'Premium ICU Plan',
+                                  annualValue: matchedPlan?.annualPrice || 28999,
+                                  gstPercent: matchedPlan?.gstPercent ?? siteSettings?.gstPercent ?? 18,
                                   notes: req.notes || '',
                                   startDate: new Date().toISOString().split('T')[0],
-                                  endDate: new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
-                                  nextVisitDate: new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0]
+                                  endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                                  nextVisitDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
                                 });
                                 setShowContractModal(true);
                               }}
@@ -2056,7 +2585,7 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
               )}
             </div>
 
-            {/* List active agreements with PDF downloads */}
+            {/* List active agreements with GST Breakdown, PDF download, and Direct Email */}
             <div className="bg-navy border border-white/5 rounded-2xl p-6 shadow-2xl space-y-4">
               <div>
                 <span className="text-[10px] text-amber font-mono uppercase font-bold tracking-wider">NABL calibration audit schedules</span>
@@ -2073,15 +2602,19 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                         <th className="p-4">Agreement Code</th>
                         <th className="p-4">Partner Station</th>
                         <th className="p-4">Period Frame</th>
-                        <th className="p-4">Agreement Value</th>
+                        <th className="p-4">Base + GST Value</th>
                         <th className="p-4 font-mono font-bold text-center">Status Index</th>
-                        <th className="p-4 text-right">PDF</th>
+                        <th className="p-4 text-right">PDF &amp; Direct Email</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 animate-fadeIn">
                       {amcContracts.map((contract) => {
                         const isExpiring = (new Date(contract.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24) <= 30;
-                        
+                        const baseVal = Number(contract.baseAnnualValue ?? contract.annualValue ?? 0);
+                        const gstPct = Number(contract.gstPercent ?? siteSettings?.gstPercent ?? 18);
+                        const gstAmt = Number(contract.gstAmount ?? Math.round(baseVal * (gstPct / 100)));
+                        const grandVal = Number(contract.totalWithGst ?? (baseVal + gstAmt));
+
                         return (
                           <tr key={contract.id} className={`hover:bg-white/2 ${
                             isExpiring ? 'bg-red-500/5 hover:bg-red-500/10' : ''
@@ -2089,13 +2622,21 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                             <td className="p-4 font-mono font-bold text-amber">{contract.contractNumber}</td>
                             <td className="p-4">
                               <span className="text-white font-bold">{contract.hospitalName}</span>
-                              <div className="text-[10px] text-gray-500 font-mono italic">{contract.planSelected}</div>
+                              <div className="text-[10px] text-gray-400 font-mono">{contract.planSelected}</div>
+                              {(contract.email || contract.userEmail) && (
+                                <div className="text-[10px] text-gray-500 font-mono">{contract.email || contract.userEmail}</div>
+                              )}
                             </td>
                             <td className="p-4 font-mono text-[10px]">
                               <div>{contract.startDate} to {contract.endDate}</div>
                               <div className="text-gray-500">Next repair check: {contract.nextVisitDate}</div>
                             </td>
-                            <td className="p-4 font-mono font-bold text-white">Rs {contract.annualValue?.toLocaleString()}</td>
+                            <td className="p-4 font-mono tabular-nums">
+                              <div className="font-bold text-white">Rs {grandVal.toLocaleString()}</div>
+                              <div className="text-[10px] text-gray-400">
+                                Base Rs {baseVal.toLocaleString()} + {gstPct}% GST (Rs {gstAmt.toLocaleString()})
+                              </div>
+                            </td>
                             <td className="p-4 text-center">
                               {isExpiring ? (
                                 <span className="inline-block px-2.5 py-0.5 rounded-full text-[8px] bg-red-600/15 text-red-400 border border-red-500/20 font-black uppercase tracking-widest animate-pulse">
@@ -2106,62 +2647,82 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                                   ACTIVE SECURE
                                 </span>
                               )}
+                              {contract.lastEmailedAt && (
+                                <div className="text-[9px] font-mono text-emerald-400 mt-1">
+                                  Emailed {new Date(contract.lastEmailedAt).toLocaleDateString()}
+                                </div>
+                              )}
                             </td>
-                            <td className="p-4 text-right">
-                              <button
-                                onClick={() => {
-                                  try {
-                                    const doc = new jsPDF();
-                                    doc.setFillColor(26, 26, 46);
-                                    doc.rect(0, 0, 210, 42, 'F');
-                                    doc.setTextColor(255, 255, 255);
-                                    doc.setFont('Helvetica', 'bold');
-                                    doc.setFontSize(22);
-                                    doc.text("SUNMEDX ANNUAL MAINTENANCE CONTRACT", 15, 24);
-                                    doc.setFontSize(9);
-                                    doc.setFont('Helvetica', 'normal');
-                                    doc.text("NABL ISO 17025 Calibrations & Hospital Asset Standards Verification Certificate", 15, 32);
+                            <td className="p-4 text-right whitespace-nowrap">
+                              <div className="flex justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openEmailContractModal(contract)}
+                                  className="px-2.5 py-1.5 rounded bg-amber/15 hover:bg-amber hover:text-navy border border-amber/30 text-amber text-[11px] font-bold inline-flex items-center gap-1 transition-colors"
+                                  title="Email Agreement to Client"
+                                >
+                                  <Mail className="w-3.5 h-3.5" />
+                                  <span>Email</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    try {
+                                      const doc = new jsPDF();
+                                      doc.setFillColor(26, 26, 46);
+                                      doc.rect(0, 0, 210, 42, 'F');
+                                      doc.setTextColor(255, 255, 255);
+                                      doc.setFont('Helvetica', 'bold');
+                                      doc.setFontSize(22);
+                                      doc.text("SUNMEDX ANNUAL MAINTENANCE CONTRACT", 15, 24);
+                                      doc.setFontSize(9);
+                                      doc.setFont('Helvetica', 'normal');
+                                      doc.text("NABL ISO 17025 Calibrations & Hospital Asset Standards Verification Certificate", 15, 32);
 
-                                    doc.setFillColor(242, 242, 242);
-                                    doc.rect(10, 50, 190, 60, 'F');
-                                    doc.setTextColor(50, 50, 50);
-                                    doc.setFontSize(11);
-                                    doc.setFont('Helvetica', 'bold');
-                                    doc.text(`AMC AGREEMENT REF: ${contract.contractNumber}`, 15, 59);
+                                      doc.setFillColor(242, 242, 242);
+                                      doc.rect(10, 50, 190, 74, 'F');
+                                      doc.setTextColor(50, 50, 50);
+                                      doc.setFontSize(11);
+                                      doc.setFont('Helvetica', 'bold');
+                                      doc.text(`AMC AGREEMENT REF: ${contract.contractNumber}`, 15, 59);
 
-                                    doc.setFontSize(9.5);
-                                    doc.setFont('Helvetica', 'normal');
-                                    doc.text(`Hospital station: ${contract.hospitalName}`, 15, 68);
-                                    doc.text(`Selected Scheme Plan: ${contract.planSelected}`, 15, 75);
-                                    doc.text(`Equipments List: ${contract.equipmentList}`, 15, 82);
-                                    doc.text(`Active Frame duration: ${contract.startDate} to ${contract.endDate}`, 15, 89);
-                                    doc.text(`Annual Agreement Value: Rs ${contract.annualValue?.toLocaleString()}`, 15, 96);
-                                    doc.text(`Next scheduled preventive: ${contract.nextVisitDate}`, 15, 103);
+                                      doc.setFontSize(9.5);
+                                      doc.setFont('Helvetica', 'normal');
+                                      doc.text(`Hospital station: ${contract.hospitalName}`, 15, 68);
+                                      doc.text(`Selected Scheme Plan: ${contract.planSelected}`, 15, 75);
+                                      doc.text(`Equipments List: ${contract.equipmentList}`, 15, 82);
+                                      doc.text(`Active Frame duration: ${contract.startDate} to ${contract.endDate}`, 15, 89);
+                                      doc.text(`Base Annual Fee: Rs ${baseVal.toLocaleString()}  |  GST (${gstPct}%): Rs ${gstAmt.toLocaleString()}`, 15, 96);
+                                      doc.setFont('Helvetica', 'bold');
+                                      doc.text(`Total Agreement Value (Incl. GST): Rs ${grandVal.toLocaleString()}`, 15, 103);
+                                      doc.setFont('Helvetica', 'normal');
+                                      doc.text(`Next scheduled preventive: ${contract.nextVisitDate}`, 15, 110);
 
-                                    doc.setFont('Helvetica', 'bold');
-                                    doc.text("COVERED CORE CLINICAL SERVICES & CHECKLISTS:", 15, 122);
-                                    doc.setFont('Helvetica', 'normal');
-                                    let currentY = 130;
-                                    contract.coveredServices?.forEach((cs: string) => {
-                                      doc.text(`* [Covered Check] ${cs}`, 20, currentY);
-                                      currentY += 8;
-                                    });
+                                      doc.setFont('Helvetica', 'bold');
+                                      doc.text("COVERED CORE CLINICAL SERVICES & CHECKLISTS:", 15, 134);
+                                      doc.setFont('Helvetica', 'normal');
+                                      let currentY = 142;
+                                      contract.coveredServices?.forEach((cs: string) => {
+                                        doc.text(`* [Covered Check] ${cs}`, 20, currentY);
+                                        currentY += 8;
+                                      });
 
-                                    doc.line(10, 230, 80, 230);
-                                    doc.text("Authorized SunMedX Engineer Sign", 15, 236);
-                                    doc.line(125, 230, 195, 230);
-                                    doc.text("Hospital Rep verification Sign", 130, 236);
+                                      doc.line(10, 230, 80, 230);
+                                      doc.text("Authorized SunMedX Engineer Sign", 15, 236);
+                                      doc.line(125, 230, 195, 230);
+                                      doc.text("Hospital Rep verification Sign", 130, 236);
 
-                                    doc.save(`SunMedX-AMC-${contract.contractNumber}.pdf`);
-                                  } catch (e: any) {
-                                    alert("Download PDF failed: " + e.message);
-                                  }
-                                }}
-                                className="p-2 hover:bg-neutral-800 rounded bg-[#10101e] border border-white/5 text-amber"
-                                title="Download Agreement PDF"
-                              >
-                                <ArrowDownToLine className="w-3.5 h-3.5" />
-                              </button>
+                                      doc.save(`SunMedX-AMC-${contract.contractNumber}.pdf`);
+                                    } catch (e: any) {
+                                      setAmcNotice({ type: 'error', text: "Download PDF failed: " + e.message });
+                                    }
+                                  }}
+                                  className="p-2 hover:bg-neutral-800 rounded bg-[#10101e] border border-white/5 text-amber"
+                                  title="Download Agreement PDF"
+                                >
+                                  <ArrowDownToLine className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -2172,145 +2733,407 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
               )}
             </div>
 
-            {/* AMC Create Agreement Form Modal */}
+            {/* AMC Plan Create / Edit Modal */}
+            {showPlanModal && (
+              <div className="fixed inset-0 z-[3000] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+                <form onSubmit={saveAmcPlan} className="bg-[#111124] max-w-lg w-full border border-amber/25 rounded-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                  <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                    <h3 className="font-syne font-black text-white text-base uppercase">
+                      {editingPlanId ? 'Edit AMC Plan & GST Rate' : 'Create AMC Plan Tier'}
+                    </h3>
+                    <button type="button" onClick={() => setShowPlanModal(false)} className="text-gray-400 hover:text-white">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Plan Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={planForm.name}
+                        onChange={(e) => setPlanForm((p) => ({ ...p, name: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Base Annual Price (INR) *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={planForm.annualPrice}
+                          onChange={(e) => setPlanForm((p) => ({ ...p, annualPrice: Number(e.target.value) }))}
+                          className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">GST Rate (%)</label>
+                        <select
+                          value={planForm.gstPercent}
+                          onChange={(e) => setPlanForm((p) => ({ ...p, gstPercent: Number(e.target.value) }))}
+                          className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white font-mono"
+                        >
+                          {[0, 5, 12, 18, 28].map((rate) => (
+                            <option key={rate} value={rate}>
+                              {rate}% GST
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="bg-navy/70 border border-amber/20 rounded-xl p-3 font-mono text-xs flex justify-between">
+                      <span className="text-gray-300">Total Incl. {planForm.gstPercent}% GST:</span>
+                      <span className="text-emerald-400 font-bold tabular-nums">
+                        Rs {(planForm.annualPrice + Math.round((planForm.annualPrice * planForm.gstPercent) / 100)).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">SLA Response Time</label>
+                        <input
+                          type="text"
+                          value={planForm.responseTime}
+                          onChange={(e) => setPlanForm((p) => ({ ...p, responseTime: e.target.value }))}
+                          className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Visit Frequency</label>
+                        <input
+                          type="text"
+                          value={planForm.visitFrequency}
+                          onChange={(e) => setPlanForm((p) => ({ ...p, visitFrequency: e.target.value }))}
+                          className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Covered Services (Comma separated)</label>
+                      <textarea
+                        rows={2}
+                        value={planForm.coveredServices}
+                        onChange={(e) => setPlanForm((p) => ({ ...p, coveredServices: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button type="button" onClick={() => setShowPlanModal(false)} className="flex-1 py-2.5 rounded-xl border border-white/15 text-xs font-bold text-gray-300">
+                      Cancel
+                    </button>
+                    <button type="submit" className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy text-xs font-black uppercase">
+                      Save AMC Plan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* AMC Create Agreement Form Modal (With Client Email & Built-In GST Calculation) */}
             {showContractModal && (
-              <div className="fixed inset-0 z-[3000] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-fadeIn">
-                <form onSubmit={createAmcContract} className="bg-[#111124] max-w-lg w-full border border-amber/20 rounded-3xl p-8 shadow-2xl relative space-y-5 overflow-y-auto max-h-[90vh]">
-                  
+              <div className="fixed inset-0 z-[3000] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-fadeIn">
+                <form onSubmit={(e) => createAmcContract(e, false)} className="bg-[#111124] max-w-xl w-full border border-amber/20 rounded-3xl p-6 sm:p-7 shadow-2xl relative space-y-4 overflow-y-auto max-h-[92vh]">
                   <div className="flex justify-between items-center border-b border-white/5 pb-3">
                     <div>
-                      <span className="text-[8px] font-mono text-amber font-black uppercase tracking-widest bg-amber-500/10 border border-amber/20 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-mono text-amber font-black uppercase tracking-widest bg-amber-500/10 border border-amber/20 px-2 py-0.5 rounded-full">
                         SunMedX Contract Desk
                       </span>
-                      <h3 className="font-syne font-black text-white text-base tracking-wider uppercase mt-1">Register Annual Maintenance Agreement</h3>
+                      <h3 className="font-syne font-black text-white text-base tracking-wider uppercase mt-1">
+                        Register Annual Maintenance Agreement
+                      </h3>
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowContractModal(false)}
                       className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:text-white"
                     >
-                      ×
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs font-mono">
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Contract Code *</label>
-                      <input 
-                        type="text" required
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Contract Code *</label>
+                      <input
+                        type="text"
+                        required
                         value={amcForm.contractNumber}
-                        onChange={(e) => setAmcForm(p => ({ ...p, contractNumber: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, contractNumber: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Partner Hospital *</label>
-                      <input 
-                        type="text" required
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Partner Hospital *</label>
+                      <input
+                        type="text"
+                        required
                         value={amcForm.hospitalName}
-                        onChange={(e) => setAmcForm(p => ({ ...p, hospitalName: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, hospitalName: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Contact Representative</label>
-                      <input 
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Contact Representative</label>
+                      <input
                         type="text"
                         value={amcForm.contactPerson}
-                        onChange={(e) => setAmcForm(p => ({ ...p, contactPerson: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, contactPerson: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Contact Phone</label>
-                      <input 
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Client Email (For Direct Dispatch) *</label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="biomed@hospital.in"
+                        value={amcForm.email}
+                        onChange={(e) => setAmcForm((p) => ({ ...p, email: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Contact Phone</label>
+                      <input
                         type="text"
                         value={amcForm.phone}
-                        onChange={(e) => setAmcForm(p => ({ ...p, phone: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
-                      />
-                    </div>
-
-                    <div className="space-y-1 col-span-2">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Equipments Serial list *</label>
-                      <input 
-                        type="text" required
-                        placeholder="Siemens MRI #SU-99A, Ultrasonic #US-001"
-                        value={amcForm.equipmentList}
-                        onChange={(e) => setAmcForm(p => ({ ...p, equipmentList: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, phone: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Calibration Scheme Selected</label>
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">AMC Plan Tier</label>
                       <select
                         value={amcForm.planSelected}
-                        onChange={(e) => setAmcForm(p => ({ ...p, planSelected: e.target.value }))}
+                        onChange={(e) => {
+                          const selectedName = e.target.value;
+                          const found = amcPlans.find((pl) => pl.name === selectedName);
+                          setAmcForm((p) => ({
+                            ...p,
+                            planSelected: selectedName,
+                            annualValue: found ? Number(found.annualPrice) : p.annualValue,
+                            gstPercent: found?.gstPercent !== undefined ? Number(found.gstPercent) : p.gstPercent,
+                          }));
+                        }}
                         className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       >
-                        <option value="Bronze Base Alignment">Bronze Base Alignment</option>
-                        <option value="Silver Calibrations Pack">Silver Calibrations Pack</option>
-                        <option value="Gold Preventive Calibration Code">Gold Preventive Calibration Code</option>
-                        <option value="Platinum Advanced Care">Platinum Advanced Care</option>
+                        {amcPlans.map((pl) => (
+                          <option key={pl.id || pl.name} value={pl.name}>
+                            {pl.name} (Rs {Number(pl.annualPrice).toLocaleString()})
+                          </option>
+                        ))}
+                        <option value="Custom Institutional AMC">Custom Institutional AMC</option>
                       </select>
                     </div>
 
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Equipments Serial list *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Siemens MRI #SU-99A, Ultrasonic #US-001"
+                        value={amcForm.equipmentList}
+                        onChange={(e) => setAmcForm((p) => ({ ...p, equipmentList: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
+                      />
+                    </div>
+
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Annual Contract Value (INR) *</label>
-                      <input 
-                        type="number" required
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Base Annual Fee (INR) *</label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
                         value={amcForm.annualValue}
-                        onChange={(e) => setAmcForm(p => ({ ...p, annualValue: Number(e.target.value) }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, annualValue: Number(e.target.value) }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none tabular-nums"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Agreement start Date *</label>
-                      <input 
-                        type="date" required
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">GST Rate (%)</label>
+                      <select
+                        value={amcForm.gstPercent}
+                        onChange={(e) => setAmcForm((p) => ({ ...p, gstPercent: Number(e.target.value) }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
+                      >
+                        {[0, 5, 12, 18, 28].map((rate) => (
+                          <option key={rate} value={rate}>
+                            {rate}% GST
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Live GST Calculation Summary */}
+                    <div className="sm:col-span-2 bg-navy border border-amber/25 rounded-xl p-3 space-y-1 tabular-nums">
+                      <div className="flex justify-between text-gray-300">
+                        <span>Base Annual Value:</span>
+                        <span>Rs {Number(amcForm.annualValue || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-amber">
+                        <span>GST ({amcForm.gstPercent}%):</span>
+                        <span>Rs {Math.round((Number(amcForm.annualValue || 0) * Number(amcForm.gstPercent || 0)) / 100).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-emerald-400 font-bold border-t border-white/10 pt-1">
+                        <span>Total Agreement Value (Incl. GST):</span>
+                        <span>
+                          Rs {(
+                            Number(amcForm.annualValue || 0) +
+                            Math.round((Number(amcForm.annualValue || 0) * Number(amcForm.gstPercent || 0)) / 100)
+                          ).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Agreement Start Date *</label>
+                      <input
+                        type="date"
+                        required
                         value={amcForm.startDate}
-                        onChange={(e) => setAmcForm(p => ({ ...p, startDate: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, startDate: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-500 font-bold uppercase">Agreement Exp Date *</label>
-                      <input 
-                        type="date" required
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Agreement Exp Date *</label>
+                      <input
+                        type="date"
+                        required
                         value={amcForm.endDate}
-                        onChange={(e) => setAmcForm(p => ({ ...p, endDate: e.target.value }))}
-                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none" 
+                        onChange={(e) => setAmcForm((p) => ({ ...p, endDate: e.target.value }))}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white outline-none"
                       />
                     </div>
                   </div>
 
-                  <div className="flex gap-2.5 pt-4">
+                  <div className="flex flex-wrap gap-2.5 pt-2">
                     <button
                       type="button"
                       onClick={() => setShowContractModal(false)}
-                      className="flex-1 py-3 border border-white/10 rounded-xl text-xs font-bold uppercase text-gray-400 font-syne"
+                      className="px-4 py-3 border border-white/10 rounded-xl text-xs font-bold uppercase text-gray-400 font-syne"
                     >
-                      Close Desk
+                      Close
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 py-3 bg-gradient-to-r from-crimson to-amber text-navy rounded-xl text-xs font-black uppercase tracking-wider font-syne"
+                      className="flex-1 py-3 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-bold uppercase tracking-wider font-syne"
                     >
-                      Persist Contract
+                      Save Contract
+                    </button>
+                    <button
+                      type="button"
+                      disabled={emailSending}
+                      onClick={(e) => createAmcContract(e as any, true)}
+                      className="flex-1 py-3 bg-gradient-to-r from-crimson to-amber text-navy rounded-xl text-xs font-black uppercase tracking-wider font-syne flex items-center justify-center gap-1.5"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>Save &amp; Email Client</span>
                     </button>
                   </div>
-
                 </form>
               </div>
             )}
 
+            {/* Direct Email AMC Agreement Modal */}
+            {emailModalContract && (
+              <div className="fixed inset-0 z-[3100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-[#111124] max-w-lg w-full border border-amber/30 rounded-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <div>
+                      <span className="text-[10px] font-mono text-amber uppercase font-bold">Direct Agreement Dispatch</span>
+                      <h3 className="font-syne font-black text-white text-base uppercase">
+                        Email {emailModalContract.contractNumber}
+                      </h3>
+                    </div>
+                    <button type="button" onClick={() => setEmailModalContract(null)} className="text-gray-400 hover:text-white">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Recipient Email *</label>
+                      <input
+                        type="email"
+                        value={emailTo}
+                        onChange={(e) => setEmailTo(e.target.value)}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Subject *</label>
+                      <input
+                        type="text"
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Agreement Summary Body *</label>
+                      <textarea
+                        rows={8}
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
+                        className="w-full p-2.5 bg-navy border border-white/10 rounded-xl text-white font-mono text-[11px] leading-relaxed"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <a
+                      href={`mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody.slice(0, 1800))}`}
+                      className="px-4 py-2.5 rounded-xl border border-white/15 text-xs font-bold text-gray-200 hover:bg-white/5 inline-flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-amber" />
+                      <span>Open Mail App</span>
+                    </a>
+                    <button
+                      type="button"
+                      disabled={emailSending || !emailTo.trim()}
+                      onClick={() => dispatchContractEmail(emailModalContract, emailTo, emailSubject, emailBody)}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-syne font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      {emailSending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      <span>{emailSending ? 'Sending...' : 'Send Direct Email'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
+        )}
+
+        {/* EMAIL MARKETING & SOCIAL MEDIA MANAGER MODULE */}
+        {activeSection === 'marketing_social' && (
+          <MarketingSocialManager
+            adminEmail={adminEmail}
+            siteSettings={siteSettings}
+            onUpdateSettings={onUpdateSettings}
+            usersList={usersList}
+            quotations={quotations}
+            amcContracts={amcContracts}
+            services={services}
+            catalogue={catalogue}
+            courses={courses}
+            logAdminAction={logAdminAction}
+          />
         )}
 
         {/* WHATSAPP ALERTS & LIVE TRANSLATIONS CONTROL MODULE */}
@@ -2790,11 +3613,14 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
                 price: draft.price || 0,
                 category: draft.category || 'Critical Care',
                 badge: draft.badge || '',
+                hsnSac: draft.hsnSac || '9018',
                 description: draft.description || '',
                 features: draft.features || [],
                 image: draft.image || PRODUCT_ASSET_FALLBACKS.analyzer,
               });
+              setFeatureInput((draft.features || []).join(', '));
               setActiveSection('catalogue');
+              setShowProdModal(true);
             }}
             onStageCourse={(draft) => {
               setEditingCourseId(null);
