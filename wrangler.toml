@@ -1,0 +1,9 @@
+name = "sunmedx"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "dist"
+
+# Optional: Uncomment after creating your Cloudflare D1 database
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "sunmedx-db"
+# database_id = "YOUR_D1_DATABASE_ID"

@@ -1,0 +1,6 @@
+{
+  "name": "SunMedX",
+  "description": "Mumbai-based biomedical services brand providing equipment testing, validation, academy courses, catalogue, smart tools, AI chatbot support, and administrative portal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

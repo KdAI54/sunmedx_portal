@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Open+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  --navy: #211D70;
+  --sunrise: linear-gradient(135deg, #211D70 0%, #272F78 100%);
+  --color-navy: #211D70;
+  --color-crimson: #EA2227;
+  --color-amber: #F8C72E;
+  --color-golden: #F8BE15;
+  --color-dark-bg: #211C70;
+  --color-orange: #F26522;
+  --color-ink: #404041;
+  --color-surface: #EAEAEA;
+}
+
+@theme {
+  --font-sans: 'Open Sans', system-ui, -apple-system, sans-serif;
+  --font-syne: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-serif: 'Merriweather', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --color-navy: var(--color-navy);
+  --color-crimson: var(--color-crimson);
+  --color-amber: var(--color-amber);
+  --color-golden: var(--color-golden);
+  --color-darkBg: var(--color-dark-bg);
+}
+
+h1, h2, h3, .logo {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-weight: 700;
+}
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+body {
+  font-family: 'Open Sans', system-ui, -apple-system, sans-serif;
+  background-color: #FFFFFF;
+  color: #404041;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Signature Institutional Visual Utilities */
+.bits-section-banner {
+  background-color: #211D70;
+  color: #FFFFFF;
+  padding: 8px 18px;
+  max-width: 100%;
+  display: inline-block;
+}
+
+@media (min-width: 640px) {
+  .bits-section-banner {
+    padding: 10px 32px;
+  }
+}
+
+.bits-lead-card {
+  border: 1px solid #211D70;
+  border-radius: 15px;
+  box-shadow: 5px 6px 0px 0px #DDDDDD;
+  background-color: #FFFFFF;
+}
+
+.bits-labs-border {
+  border: 2px solid #F8BE15;
+  border-radius: 20px;
+}
+
+.bits-double-gold-frame {
+  position: relative;
+  border: 5px solid #F5B700;
+  background-color: #FFFFFF;
+}
+
+.bits-double-gold-frame::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 2px solid #F5B700;
+  pointer-events: none;
+}
+
+.page-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #F4F5F8;
+}
+::-webkit-scrollbar-thumb {
+  background: #B8BCD4;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #211D70;
+}

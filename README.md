@@ -1,11 +1,77 @@
-<div align="center">
+# SunMedX Biomedical Platform
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Biomedical calibration, preventive maintenance, equipment catalogue, clinical tools, and service portal built with React, Vite, TypeScript, and Tailwind CSS — structured for GitHub + Cloudflare Pages deployment with pluggable data and authentication adapters.
 
-  <h1>Built with AI Studio</h2>
+## Project Structure
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+```text
+├── .github/workflows/deploy.yml   # CI/CD deployment to Cloudflare Pages
+├── functions/api/                 # Cloudflare Pages Functions (AI + D1 collections + Auth)
+├── public/_headers                # Cloudflare Pages security headers
+├── src/
+│   ├── admin/                     # Admin CMS & operations console
+│   ├── components/                # Shared UI components
+│   ├── config/                    # Environment config & initial seed data
+│   ├── pages/                     # Route views (Home, AuthPage, Services, Catalogue, Portal, Technician)
+│   ├── services/                  # Pluggable DataAdapter & AuthAdapter interfaces
+│   ├── utils/                     # WhatsApp alerts & translation helpers
+│   ├── App.tsx                    # Root shell and hash router
+│   └── types.ts                   # Shared TypeScript interfaces
+├── schema.sql                     # Cloudflare D1 / SQLite schema
+├── server.ts                      # Local Express + Vite dev server
+├── wrangler.toml                  # Cloudflare Pages configuration
+└── package.json
+```
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Local Development
 
-</div>
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+## Push to GitHub
+
+```bash
+git init
+git add .
+git commit -m "Cloudflare-ready build with pluggable data and auth layer"
+git branch -M main
+git remote add origin https://github.com/<your-org>/<your-repo>.git
+git push -u origin main
+```
+
+## Cloudflare Pages Deployment
+
+1. Open **Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git**.
+2. Select your GitHub repository and set:
+   - **Build command**: `npm run build:cf`
+   - **Build output directory**: `dist`
+3. Set environment variables in **Settings → Environment variables**:
+   - `GEMINI_API_KEY`: Gemini API key for `/api/diagnose` and `/api/suggest-quote`.
+   - `AUTH_SECRET`: Random secret string for signing auth tokens (when using `/api/auth/*`).
+
+## Connecting an External Database & Auth Source via Environment Variables
+
+Firebase Auth and Firestore have been removed. Choose any backend mode by setting environment variables on Cloudflare Pages:
+
+### Option 1: Cloudflare D1 (Built-in Serverless Edge API)
+1. Create a D1 database: `npx wrangler d1 create sunmedx-db`
+2. Apply schema: `npx wrangler d1 execute sunmedx-db --remote --file=./schema.sql`
+3. Bind the database as `DB` in Cloudflare Pages **Settings → Functions → D1 database bindings** (or uncomment `[[d1_databases]]` in `wrangler.toml`).
+4. Set build-time env vars:
+   - `VITE_DATA_SOURCE=rest`
+   - `VITE_API_BASE_URL=/api`
+   - `VITE_AUTH_ENDPOINT=/api/auth`
+
+### Option 2: External REST API
+- `VITE_DATA_SOURCE=rest`
+- `VITE_API_BASE_URL=https://api.yourdomain.com`
+- `VITE_AUTH_ENDPOINT=https://api.yourdomain.com/auth`
+
+### Option 3: Supabase (PostgREST)
+Create a `documents` table `(collection text, id text, data jsonb, updated_at timestamptz, primary key (collection, id))` and set:
+- `VITE_DATA_SOURCE=supabase`
+- `VITE_SUPABASE_URL=https://your-project.supabase.co`
+- `VITE_SUPABASE_ANON_KEY=your-anon-key`
