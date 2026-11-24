@@ -19,7 +19,26 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
       question?: string;
       equipmentContext?: string;
       hospitalName?: string;
+      brandName?: string;
+      userRole?: string;
+      aiQueriesUsed?: number;
+      aiQueryLimit?: number;
     };
+
+    const privilegedRoles = ['superadmin', 'owner', 'admin', 'technician'];
+    const role = (body.userRole || 'customer').toLowerCase();
+    const limit = typeof body.aiQueryLimit === 'number' ? body.aiQueryLimit : -1;
+    const used = typeof body.aiQueriesUsed === 'number' ? body.aiQueriesUsed : 0;
+
+    if (!privilegedRoles.includes(role) && limit >= 0 && used >= limit) {
+      return Response.json(
+        {
+          error: `Monthly AI query limit reached (${used}/${limit}). Upgrade to Pro or Enterprise in Client Hub → Plan & Billing.`,
+          upgradeRequired: true,
+        },
+        { status: 402 }
+      );
+    }
 
     const question = (body.question || '').trim();
     if (!question || question.length > 2500) {
@@ -29,7 +48,8 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
       );
     }
 
-    const prompt = `You are the SunMedX Client Hub Biomedical AI Advisor assisting verified hospital clinicians and biomedical engineers in India.
+    const activeBrand = (body.brandName || 'SunMedX').trim();
+    const prompt = `You are the ${activeBrand} Client Hub Biomedical AI Advisor assisting verified hospital clinicians and biomedical engineers in India.
 Answer clearly, accurately, and concisely with NABL ISO/IEC 17025 and IEC 60601 safety context where relevant. Do not provide human clinical diagnosis—focus strictly on medical device calibration, preventive maintenance, AMC coverage, and analyzer troubleshooting.
 
 ${body.hospitalName ? `Hospital / Organization: ${body.hospitalName}\n` : ''}${body.equipmentContext ? `Equipment / Asset Context: ${body.equipmentContext}\n` : ''}Client Question: ${question}`;

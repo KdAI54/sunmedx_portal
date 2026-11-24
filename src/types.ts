@@ -146,8 +146,14 @@ export interface SiteSettings {
   chatbotEnabled: boolean;
   paymentKeyId: string;
   paymentGateway?: PaymentGatewayConfig;
-  // CMS Styling Settings
+  // CMS & Single-Owner White-Label Styling Settings
   logoUrl?: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  ownerPlanId?: SubscriptionTierId;
+  customDomain?: string;
+  poweredByVisible?: boolean;
+  whiteLabelEnabled?: boolean;
   socialAccounts?: {
     linkedin?: string;
     instagram?: string;
@@ -290,7 +296,16 @@ export interface UserProfile {
   name: string;
   phone: string;
   hospital: string;
-  role: 'customer' | 'admin' | 'technician' | 'superadmin';
+  role: 'customer' | 'client' | 'owner' | 'admin' | 'technician' | 'superadmin';
+  accountStatus?: 'active' | 'paused';
+  pausedAt?: string;
+  pausedReason?: string;
+  pausedBy?: string;
+  planId?: SubscriptionTierId;
+  planStatus?: 'active' | 'expired' | 'trial';
+  aiQueriesUsed?: number;
+  aiQuotaResetMonth?: string;
+  subscriptionExpiresAt?: string;
   createdAt: string;
 }
 
@@ -480,3 +495,46 @@ export interface SocialPost {
   createdAt: string;
 }
 
+export type SubscriptionTierId = 'free' | 'pro' | 'enterprise';
+
+export type PlanModuleKey =
+  | 'catalogue'
+  | 'basicTools'
+  | 'aiAdvisor'
+  | 'aiFaultTriage'
+  | 'amcTracking'
+  | 'pdfCertificates'
+  | 'priorityDispatch'
+  | 'marketingTools';
+
+export interface SubscriptionPlan {
+  id: SubscriptionTierId;
+  name: string;
+  audience: string;
+  tagline: string;
+  monthlyPriceInr: number;
+  annualPriceInr: number;
+  aiQueryLimitPerMonth: number; // -1 = unlimited
+  maxAmcContracts: number; // -1 = unlimited
+  enabledModules: Record<PlanModuleKey, boolean>;
+  highlights: string[];
+  updatedAt?: string;
+}
+
+export interface SubscriptionOrder {
+  id?: string;
+  userId: string;
+  userEmail: string;
+  hospitalName: string;
+  planId: SubscriptionTierId;
+  planName: string;
+  billingCycle: 'monthly' | 'annual';
+  baseAmount: number;
+  gstPercent: number;
+  gstAmount: number;
+  totalAmount: number;
+  paymentProvider: string;
+  paymentReference: string;
+  status: 'Paid' | 'Pending Verification' | 'Activated By SuperAdmin';
+  createdAt: string;
+}

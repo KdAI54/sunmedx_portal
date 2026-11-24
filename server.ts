@@ -564,7 +564,21 @@ async function startServer() {
         return res.status(500).json({ error: "GEMINI_API_KEY environment variable is required on the server." });
       }
 
-      const { equipmentType, problemDescription } = req.body;
+      const { equipmentType, problemDescription, userRole, aiQueriesUsed, aiQueryLimit } = req.body || {};
+      const privilegedRoles = ["superadmin", "owner", "admin", "technician"];
+      const normalizedRole = String(userRole || "customer").toLowerCase();
+      if (
+        !privilegedRoles.includes(normalizedRole) &&
+        typeof aiQueryLimit === "number" &&
+        aiQueryLimit >= 0 &&
+        typeof aiQueriesUsed === "number" &&
+        aiQueriesUsed >= aiQueryLimit
+      ) {
+        return res.status(402).json({
+          error: `Monthly AI query limit reached (${aiQueriesUsed}/${aiQueryLimit}). Upgrade to Pro or Enterprise in Client Hub → Plan & Billing.`,
+          upgradeRequired: true,
+        });
+      }
       if (!equipmentType || !problemDescription) {
         return res.status(400).json({ error: "Missing equipmentType or problemDescription" });
       }
@@ -678,13 +692,29 @@ async function startServer() {
         });
       }
 
-      const { question, equipmentContext, hospitalName } = req.body || {};
+      const { question, equipmentContext, hospitalName, brandName, userRole, aiQueriesUsed, aiQueryLimit } = req.body || {};
+      const privilegedRoles = ["superadmin", "owner", "admin", "technician"];
+      const normalizedRole = String(userRole || "customer").toLowerCase();
+      if (
+        !privilegedRoles.includes(normalizedRole) &&
+        typeof aiQueryLimit === "number" &&
+        aiQueryLimit >= 0 &&
+        typeof aiQueriesUsed === "number" &&
+        aiQueriesUsed >= aiQueryLimit
+      ) {
+        return res.status(402).json({
+          error: `Monthly AI query limit reached (${aiQueriesUsed}/${aiQueryLimit}). Upgrade to Pro or Enterprise in Client Hub → Plan & Billing.`,
+          upgradeRequired: true,
+        });
+      }
+
       if (typeof question !== "string" || !question.trim() || question.length > 2500) {
         return res.status(400).json({ error: "Please provide a valid clinical or calibration question (1–2500 characters)." });
       }
 
+      const activeBrand = String(brandName || "SunMedX").trim();
       const ai = createGeminiClient(apiKey);
-      const prompt = `You are the SunMedX Client Hub Biomedical AI Advisor assisting verified hospital clinicians and biomedical engineers in India.
+      const prompt = `You are the ${activeBrand} Client Hub Biomedical AI Advisor assisting verified hospital clinicians and biomedical engineers in India.
 Answer clearly, accurately, and concisely with NABL ISO/IEC 17025 and IEC 60601 safety context where relevant. Do not provide human clinical diagnosis—focus strictly on medical device calibration, preventive maintenance, AMC coverage, and analyzer troubleshooting.
 
 ${hospitalName ? `Hospital / Organization: ${hospitalName}\n` : ""}${equipmentContext ? `Equipment / Asset Context: ${equipmentContext}\n` : ""}Client Question: ${question.trim()}`;

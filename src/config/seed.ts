@@ -1,4 +1,5 @@
 import { getDb } from "../services/dataClient";
+import { DEFAULT_SUBSCRIPTION_PLANS, getCurrentMonthKey } from "./plans";
 import patientMonitorImg from "../assets/images/biomed_patient_monitor_1795323353440.jpg";
 import defibrillatorImg from "../assets/images/biomed_defibrillator_1795323353568.jpg";
 import ventilatorKitImg from "../assets/images/biomed_ventilator_kit_1795323353608.jpg";
@@ -100,6 +101,23 @@ export async function checkAndSeedDatabase(statusCallback?: (msg: string) => voi
           }
           await db.collection("products").doc(doc.id).update({ image: localImg });
         }
+      }
+      // Ensure subscription plans exist on pre-seeded databases
+      const plansSnap = await db.collection("subscription_plans").get();
+      if (!plansSnap.docs || plansSnap.docs.length === 0) {
+        for (const plan of DEFAULT_SUBSCRIPTION_PLANS) {
+          await db.collection("subscription_plans").doc(plan.id).set(plan);
+        }
+      }
+
+      if (typeof existingData?.poweredByVisible === "undefined") {
+        await db.collection("site_settings").doc("global").update({
+          ownerName: existingData?.ownerName || "SunMedX Operations Owner",
+          ownerEmail: existingData?.ownerEmail || "admin@sunmedx.in",
+          ownerPlanId: existingData?.ownerPlanId || "enterprise",
+          poweredByVisible: true,
+          whiteLabelEnabled: true,
+        });
       }
       return;
     }
@@ -567,6 +585,12 @@ export async function checkAndSeedDatabase(statusCallback?: (msg: string) => voi
       paymentKeyId: "rzp_test_GCPKeyHolder99", // Public publishable key ID
       paymentGateway: DEFAULT_PAYMENT_GATEWAY,
       logoUrl: "",
+      ownerName: "SunMedX Operations Owner",
+      ownerEmail: "admin@sunmedx.in",
+      ownerPlanId: "enterprise",
+      customDomain: "portal.sunmedx.in",
+      poweredByVisible: true,
+      whiteLabelEnabled: true,
       themeVariables: {
         colorNavy: DEFAULT_NAVY,
         colorCrimson: DEFAULT_CRIMSON,
@@ -574,9 +598,14 @@ export async function checkAndSeedDatabase(statusCallback?: (msg: string) => voi
         colorGolden: DEFAULT_GOLDEN,
         colorDarkBg: DEFAULT_DARK_BG
       },
-      homepageOrder: ["hero", "stats", "services_preview", "academy_preview", "tools_preview", "testimonials"]
+      homepageOrder: ["hero", "stats", "services_preview", "plans_preview", "academy_preview", "tools_preview", "testimonials"]
     };
     await db.collection("site_settings").doc("global").set(defaultSettings);
+
+    statusCallback?.("Seeding subscription tiers...");
+    for (const plan of DEFAULT_SUBSCRIPTION_PLANS) {
+      await db.collection("subscription_plans").doc(plan.id).set(plan);
+    }
 
     statusCallback?.("Seeding AMC Plans...");
     const amcPlans = [
@@ -750,12 +779,13 @@ export async function checkAndSeedDatabase(statusCallback?: (msg: string) => voi
     }
 
     statusCallback?.("Seeding authorization seed profile users...");
+    const currentMonth = getCurrentMonthKey();
     const defaultSecures = [
-      { uid: "sm-admin-uid", email: "admin@sunmedx.in", name: "SunMedX Administrator", phone: "+91 99999 00000", hospital: "SunMedX Headquarters", role: "admin", createdAt: new Date().toISOString() },
-      { uid: "sm-tech-uid", email: "tech@sunmedx.in", name: "Rohan Deshmukh", phone: "+91 98333 44444", hospital: "SunMedX Senior Engineer", role: "technician", createdAt: new Date().toISOString() },
-      { uid: "sm-super-uid", email: "superadmin@sunmedx.in", name: "SuperAdmin Platform Manager", phone: "+91 99999 11111", hospital: "Platform Headquarters", role: "superadmin", createdAt: new Date().toISOString() },
-      { uid: "sm-krishna-uid", email: "krishnadigitalai@gmail.com", name: "Krishna SuperAdmin", phone: "+91 99999 22222", hospital: "Platform Headquarters", role: "superadmin", createdAt: new Date().toISOString() },
-      { uid: "sm-client-uid", email: "client@sunmedx.in", name: "Dr. Sandeep Nair", phone: "+91 98888 77777", hospital: "Bandra Hope Clinic", role: "customer", createdAt: new Date().toISOString() }
+      { uid: "sm-admin-uid", email: "admin@sunmedx.in", name: "Brand Owner Admin", phone: "+91 99999 00000", hospital: "SunMedX Partner Hub", role: "owner", planId: "enterprise", planStatus: "active", aiQueriesUsed: 0, aiQuotaResetMonth: currentMonth, createdAt: new Date().toISOString() },
+      { uid: "sm-tech-uid", email: "tech@sunmedx.in", name: "Rohan Deshmukh", phone: "+91 98333 44444", hospital: "SunMedX Senior Engineer", role: "technician", planId: "pro", planStatus: "active", aiQueriesUsed: 0, aiQuotaResetMonth: currentMonth, createdAt: new Date().toISOString() },
+      { uid: "sm-super-uid", email: "superadmin@sunmedx.in", name: "SuperAdmin Platform Manager", phone: "+91 99999 11111", hospital: "SunMedX Headquarters", role: "superadmin", planId: "enterprise", planStatus: "active", aiQueriesUsed: 0, aiQuotaResetMonth: currentMonth, createdAt: new Date().toISOString() },
+      { uid: "sm-krishna-uid", email: "krishnadigitalai@gmail.com", name: "Krishna SuperAdmin", phone: "+91 99999 22222", hospital: "SunMedX Platform Master", role: "superadmin", planId: "enterprise", planStatus: "active", aiQueriesUsed: 0, aiQuotaResetMonth: currentMonth, createdAt: new Date().toISOString() },
+      { uid: "sm-client-uid", email: "client@sunmedx.in", name: "Dr. Sandeep Nair", phone: "+91 98888 77777", hospital: "Bandra Hope Clinic", role: "customer", planId: "free", planStatus: "active", aiQueriesUsed: 0, aiQuotaResetMonth: currentMonth, createdAt: new Date().toISOString() }
     ];
     for (const secUser of defaultSecures) {
       await db.collection("users").doc(secUser.uid).set(secUser);

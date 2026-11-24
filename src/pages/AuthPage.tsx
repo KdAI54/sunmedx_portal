@@ -4,12 +4,16 @@ import { getAuth, AuthUser } from '../services/authService';
 
 interface AuthPageProps {
   initialMode?: 'signin' | 'signup';
+  externalNotice?: string;
+  onDismissNotice?: () => void;
   onSuccess: (user: AuthUser) => void;
   onCancel: () => void;
 }
 
 export default function AuthPage({
   initialMode = 'signin',
+  externalNotice = '',
+  onDismissNotice,
   onSuccess,
   onCancel,
 }: AuthPageProps) {
@@ -31,6 +35,7 @@ export default function AuthPage({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (onDismissNotice) onDismissNotice();
     setSubmitting(true);
 
     try {
@@ -49,8 +54,8 @@ export default function AuthPage({
   };
 
   return (
-    <div className="min-h-[78vh] bg-[#EAEAEA]/60 flex items-center justify-center px-6 py-12 page-fade-in">
-      <div className="w-full max-w-[420px] space-y-5">
+    <div className="min-h-[78vh] bg-[#F4F6FA] flex items-center justify-center px-6 py-12 page-fade-in">
+      <div className="w-full max-w-[440px] space-y-5">
         <button
           type="button"
           onClick={onCancel}
@@ -60,27 +65,27 @@ export default function AuthPage({
           <span>Back to home</span>
         </button>
 
-        <div className="bg-white border-2 border-[#211D70] rounded-xl p-8 space-y-6 shadow-xl">
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 space-y-6 shadow-sm">
           {/* Segmented Control */}
-          <div className="grid grid-cols-2 gap-1 p-1 bg-[#EAEAEA] rounded-lg border border-[#D4D6E2]">
+          <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
             <button
               type="button"
               onClick={() => switchMode('signin')}
-              className={`py-2 text-xs font-bold rounded-md transition-colors whitespace-nowrap ${
+              className={`py-2 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
                 mode === 'signin'
-                  ? 'bg-[#211D70] text-[#F8C72E]'
-                  : 'text-[#404041] hover:text-[#211D70]'
+                  ? 'bg-[#211D70] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-[#211D70]'
               }`}
             >
-              Sign In
+              Sign In to Portal
             </button>
             <button
               type="button"
               onClick={() => switchMode('signup')}
-              className={`py-2 text-xs font-bold rounded-md transition-colors whitespace-nowrap ${
+              className={`py-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
                 mode === 'signup'
-                  ? 'bg-[#211D70] text-[#F8C72E]'
-                  : 'text-[#404041] hover:text-[#211D70]'
+                  ? 'bg-[#211D70] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-[#211D70]'
               }`}
             >
               Create Account
@@ -91,12 +96,30 @@ export default function AuthPage({
             <h1 className="font-syne font-bold text-2xl text-[#211D70] tracking-tight">
               {mode === 'signin' ? 'Welcome back' : 'Create your account'}
             </h1>
-            <p className="text-sm text-[#505050] leading-relaxed">
+            <p className="text-sm text-slate-600 leading-relaxed">
               {mode === 'signin'
-                ? 'Sign in to view calibration reports, bookings, and contracts.'
-                : 'Register your clinic or hospital profile to manage biomedical assets.'}
+                ? 'Sign in to access your portal, reports, and contracts.'
+                : 'Register your clinic or hospital profile to get started.'}
             </p>
           </div>
+
+          {externalNotice && !error && (
+            <div
+              role="alert"
+              className="text-xs text-[#9A3412] bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 leading-relaxed font-semibold flex items-start justify-between gap-2"
+            >
+              <span>{externalNotice}</span>
+              {onDismissNotice && (
+                <button
+                  type="button"
+                  onClick={onDismissNotice}
+                  className="text-[11px] underline shrink-0"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          )}
 
           {error && (
             <div
@@ -122,7 +145,7 @@ export default function AuthPage({
                     placeholder="Dr. Ananya Sharma"
                     value={name}
                     onChange={e => setName(e.target.value)}
-                    className="w-full bg-white border border-[#D4D6E2] text-[#211D70] placeholder-[#505050]/55 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#F26522]"
+                    className="w-full bg-white border border-slate-300 text-[#211D70] placeholder-slate-400 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#211D70]"
                   />
                 </div>
 
@@ -138,7 +161,7 @@ export default function AuthPage({
                     placeholder="City Care Hospital"
                     value={hospital}
                     onChange={e => setHospital(e.target.value)}
-                    className="w-full bg-white border border-[#D4D6E2] text-[#211D70] placeholder-[#505050]/55 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#F26522]"
+                    className="w-full bg-white border border-slate-300 text-[#211D70] placeholder-slate-400 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#211D70]"
                   />
                 </div>
               </>
@@ -156,7 +179,7 @@ export default function AuthPage({
                 placeholder="name@hospital.in"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full bg-white border border-[#D4D6E2] text-[#211D70] placeholder-[#505050]/55 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#F26522]"
+                className="w-full bg-white border border-slate-300 text-[#211D70] placeholder-slate-400 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#211D70]"
               />
             </div>
 
@@ -174,13 +197,13 @@ export default function AuthPage({
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="w-full bg-white border border-[#D4D6E2] text-[#211D70] placeholder-[#505050]/55 rounded-lg pl-4 pr-11 py-2.5 text-sm focus:outline-none focus:border-[#F26522]"
+                  className="w-full bg-white border border-slate-300 text-[#211D70] placeholder-slate-400 rounded-lg pl-4 pr-11 py-2.5 text-sm focus:outline-none focus:border-[#211D70]"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#505050] hover:text-[#211D70] p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-[#211D70] p-1"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -190,18 +213,17 @@ export default function AuthPage({
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-3 px-4 rounded-md bg-[#F8C72E] hover:bg-[#211D70] hover:text-white text-[#211D70] text-sm font-bold transition-colors disabled:opacity-60"
+              className="w-full py-3 px-4 rounded-xl bg-[#211D70] hover:bg-[#1a1658] text-[#F8C72E] text-sm font-bold transition-colors disabled:opacity-60 shadow-xs"
             >
               {submitting
                 ? mode === 'signin'
                   ? 'Signing in...'
                   : 'Creating account...'
                 : mode === 'signin'
-                ? 'Sign In'
+                ? 'Sign In to Portal'
                 : 'Create Account'}
             </button>
           </form>
-
         </div>
       </div>
     </div>

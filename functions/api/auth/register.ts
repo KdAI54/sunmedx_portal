@@ -91,18 +91,34 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
     .bind(uid, email, passwordHash, salt, name, hospital, role, now)
     .run();
 
+  const currentMonth = now.slice(0, 7);
+  const planId = isSuperAdmin ? 'enterprise' : 'free';
+
   await env.DB.prepare(
     'INSERT OR REPLACE INTO documents (collection, id, data, updated_at) VALUES (?, ?, ?, ?)'
   )
     .bind(
       'users',
       uid,
-      JSON.stringify({ uid, email, name, phone: '', hospital, role, verified: isSuperAdmin, createdAt: now }),
+      JSON.stringify({
+        uid,
+        email,
+        name,
+        phone: '',
+        hospital,
+        role,
+        planId,
+        planStatus: 'active',
+        aiQueriesUsed: 0,
+        aiQuotaResetMonth: currentMonth,
+        verified: isSuperAdmin,
+        createdAt: now,
+      }),
       now
     )
     .run();
 
-  const user = { uid, email, name, hospital, role };
+  const user = { uid, email, name, hospital, role, planId };
   const token = env.AUTH_SECRET ? await signToken(user, env.AUTH_SECRET) : undefined;
   return Response.json({ user, token }, { status: 201 });
 }

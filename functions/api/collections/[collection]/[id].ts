@@ -108,6 +108,28 @@ export async function onRequestDelete({ params, env }: FunctionContext): Promise
     return Response.json({ error: 'Invalid collection or document ID.' }, { status: 400 });
   }
 
+  if (collection === 'users') {
+    const existing = await env.DB.prepare('SELECT data FROM documents WHERE collection = ? AND id = ?')
+      .bind('users', id)
+      .first<{ data: string }>()
+      .catch(() => null);
+    if (existing?.data) {
+      try {
+        const parsed = JSON.parse(existing.data);
+        if (String(parsed?.email || '').toLowerCase().trim() === 'krishnadigitalai@gmail.com') {
+          return Response.json({ error: 'Primary Super Admin account cannot be deleted.' }, { status: 403 });
+        }
+      } catch {
+        // Ignore parse failure
+      }
+    }
+    try {
+      await env.DB.prepare('DELETE FROM auth_accounts WHERE uid = ?').bind(id).run();
+    } catch {
+      // auth_accounts table may not exist in all environments
+    }
+  }
+
   await env.DB.prepare('DELETE FROM documents WHERE collection = ? AND id = ?')
     .bind(collection, id)
     .run();

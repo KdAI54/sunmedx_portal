@@ -80,17 +80,40 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
     return Response.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
 
-  const verifiedRole =
-    account.email.toLowerCase().trim() === 'krishnadigitalai@gmail.com'
-      ? 'superadmin'
-      : account.role;
+  const userDocRow = await env.DB.prepare(
+    'SELECT data FROM documents WHERE collection = ? AND id = ?'
+  )
+    .bind('users', account.uid)
+    .first<{ data: string }>()
+    .catch(() => null);
+
+  let userDoc: Record<string, any> | null = null;
+  if (userDocRow?.data) {
+    try {
+      userDoc = JSON.parse(userDocRow.data);
+    } catch {
+      userDoc = null;
+    }
+  }
+
+  const isMasterSuperAdmin = account.email.toLowerCase().trim() === 'krishnadigitalai@gmail.com';
+  if (!isMasterSuperAdmin && userDoc?.accountStatus === 'paused') {
+    return Response.json(
+      { error: 'Your account has been paused by the Super Admin. Contact support to restore access.' },
+      { status: 403 }
+    );
+  }
+
+  const verifiedRole = isMasterSuperAdmin ? 'superadmin' : userDoc?.role || account.role;
 
   const user = {
     uid: account.uid,
     email: account.email,
-    name: account.name,
-    hospital: account.hospital,
+    name: userDoc?.name || account.name,
+    hospital: userDoc?.hospital || account.hospital,
     role: verifiedRole,
+    planId: userDoc?.planId || (isMasterSuperAdmin ? 'enterprise' : 'free'),
+    accountStatus: userDoc?.accountStatus || 'active',
   };
 
   const token = env.AUTH_SECRET ? await signToken(user, env.AUTH_SECRET) : undefined;

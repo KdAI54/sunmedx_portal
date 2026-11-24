@@ -18,7 +18,25 @@ export async function onRequestPost({ request, env }: FunctionContext): Promise<
     const body = (await request.json()) as {
       equipmentType?: string;
       problemDescription?: string;
+      userRole?: string;
+      aiQueriesUsed?: number;
+      aiQueryLimit?: number;
     };
+
+    const privilegedRoles = ['superadmin', 'owner', 'admin', 'technician'];
+    const role = (body.userRole || 'customer').toLowerCase();
+    const limit = typeof body.aiQueryLimit === 'number' ? body.aiQueryLimit : -1;
+    const used = typeof body.aiQueriesUsed === 'number' ? body.aiQueriesUsed : 0;
+
+    if (!privilegedRoles.includes(role) && limit >= 0 && used >= limit) {
+      return Response.json(
+        {
+          error: `Monthly AI query limit reached (${used}/${limit}). Upgrade to Pro or Enterprise in Client Hub → Plan & Billing.`,
+          upgradeRequired: true,
+        },
+        { status: 402 }
+      );
+    }
 
     if (!body.equipmentType || !body.problemDescription) {
       return Response.json(

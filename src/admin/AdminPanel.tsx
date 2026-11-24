@@ -4,10 +4,11 @@ import {
   BarChart2, ShieldAlert, Users, ShoppingBag, ClipboardList, BookOpen, BookOpenText, Wrench, Settings, Play,
   MessageSquare, Plus, Edit, Trash2, Check, RefreshCw, Eye, Send, FileText, ArrowRight, Palette,
   ExternalLink, ArrowDownToLine, PlusCircle, AlertCircle, RefreshCcw, LogOut, CreditCard, Receipt, Menu, X, Bot, Sparkles,
-  Mail, Megaphone, Search, Copy
+  Mail, Megaphone, Search, Copy, Crown, Sliders, Layers, ChevronDown, ChevronRight, LayoutGrid, Globe
 } from 'lucide-react';
 import { getDb } from '../services/dataClient';
 import { PRODUCT_ASSET_FALLBACKS } from '../config/seed';
+import { DEFAULT_SUBSCRIPTION_PLANS, getEffectiveAiUsage } from '../config/plans';
 import PlatformManager from '../pages/PlatformManager';
 import ImageAttachmentField from '../components/ImageAttachmentField';
 import QuoteInvoiceGenerator from './QuoteInvoiceGenerator';
@@ -15,9 +16,12 @@ import PaymentGatewaySetup from './PaymentGatewaySetup';
 import BiomedicalAgentWorker from './BiomedicalAgentWorker';
 import SunMedXDocumentation from './SunMedXDocumentation';
 import MarketingSocialManager from './MarketingSocialManager';
+import SuperAdminSaasConsole from './SuperAdminSaasConsole';
+import UserAccountsManager from './UserAccountsManager';
+import { isClientBrandRole, isSuperAdminEmail } from '../config/roles';
 import {
   Product, Course, Tool, ChatbotQA, ServiceRequest, QuotationRequest,
-  Order, Message, ChangeLog, SiteSettings, UserProfile
+  Order, Message, ChangeLog, SiteSettings, UserProfile, SubscriptionPlan, SubscriptionTierId
 } from '../types';
 
 interface AdminPanelProps {
@@ -28,13 +32,16 @@ interface AdminPanelProps {
 }
 
 type AdminSection =
-  | 'overview' | 'ai_worker' | 'users' | 'catalogue' | 'quotations' | 'orders' | 'invoice_generator' | 'payment_gateway' | 'services'
+  | 'overview' | 'saas_control' | 'ai_worker' | 'users' | 'catalogue' | 'quotations' | 'orders' | 'invoice_generator' | 'payment_gateway' | 'services'
   | 'messages' | 'academy' | 'validation' | 'tools' | 'chatbot' | 'announcements'
   | 'billing' | 'cms' | 'changelog' | 'amc_manager' | 'marketing_social' | 'saas_telemetry' | 'advanced_analytics' | 'documentation' | 'platform_manager';
 
 export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdateSettings }: AdminPanelProps) {
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const [overviewCategory, setOverviewCategory] = useState<'all' | 'operations' | 'field' | 'growth' | 'governance'>('all');
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   
   // Dynamic Lists states
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
@@ -56,6 +63,7 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
   const [waTemplates, setWaTemplates] = useState<any[]>([]);
   const [waLogs, setWaLogs] = useState<any[]>([]);
   const [translations, setTranslations] = useState<any[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>(DEFAULT_SUBSCRIPTION_PLANS);
 
   // Loading indicator helper
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -63,9 +71,8 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
   const currentUserProfile = usersList.find(
     (u) => (u.email || '').toLowerCase().trim() === adminEmail.toLowerCase().trim()
   );
-  const isSuperAdmin = currentUserProfile?.role === 'superadmin' || 
-                       adminEmail.toLowerCase().trim() === 'superadmin@sunmedx.in' || 
-                       adminEmail.toLowerCase().trim() === 'krishnadigitalai@gmail.com';
+  const isSuperAdmin =
+    currentUserProfile?.role === 'superadmin' || isSuperAdminEmail(adminEmail);
 
   // Subscribe to all datasets on mount
   useEffect(() => {
@@ -194,11 +201,22 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
       setTranslations(list);
     });
 
+    // 18. Subscription Tiers (Free / Pro / Enterprise)
+    const unsubPlans = db.collection('subscription_plans').onSnapshot((snap: any) => {
+      const list: SubscriptionPlan[] = [];
+      snap.forEach((doc: any) => list.push({ id: doc.id, ...doc.data() }));
+      if (list.length > 0) {
+        const order: SubscriptionTierId[] = ['free', 'pro', 'enterprise'];
+        list.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+        setSubscriptionPlans(list);
+      }
+    });
+
     return () => {
       unsubUsers(); unsubProd(); unsubQuotes(); unsubOrders(); unsubServ();
       unsubMsg(); unsubCourses(); unsubTools(); unsubQa(); unsubLogs();
       unsubTechJobs(); unsubAmcReqs(); unsubAmcCon(); unsubAmcPlan();
-      unsubWaTemplates(); unsubWaLogs(); unsubTrans();
+      unsubWaTemplates(); unsubWaLogs(); unsubTrans(); unsubPlans();
     };
   }, []);
 
@@ -793,22 +811,6 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
     }
   };
 
-  // UPDATE CUSTOMER ROLES
-  const toggleUserRole = async (uid: string, currentRole: 'customer' | 'admin', email: string) => {
-    if (email === adminEmail) {
-      alert("You cannot revoke your own admin rights!");
-      return;
-    }
-    const nextRole = currentRole === 'admin' ? 'customer' : 'admin';
-    try {
-      const db = getDb();
-      await db.collection('users').doc(uid).update({ role: nextRole });
-      await logAdminAction("USER_ROLE_CHANGE", `Toggled email '${email}' role to '${nextRole}'`);
-    } catch (e: any) {
-      alert(e.message);
-    }
-  };
-
   // ANSWER HOSPITAL QUOTATION Inquiries
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
   const [quotePrice, setQuotePrice] = useState('5000');
@@ -833,25 +835,77 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
     }
   };
 
-  // CMS COLOR VARIABLE UPDATER
+  // BRAND OWNER WHITE-LABEL & CMS VARIABLE UPDATER
   const [cmsNavy, setCmsNavy] = useState('');
   const [cmsCrimson, setCmsCrimson] = useState('');
   const [cmsAmber, setCmsAmber] = useState('');
   const [cmsGolden, setCmsGolden] = useState('');
   const [cmsDarkBg, setCmsDarkBg] = useState('');
+  const [brandForm, setBrandForm] = useState({
+    siteName: siteSettings?.siteName || 'SunMedX',
+    tagline: siteSettings?.tagline || '',
+    logoUrl: siteSettings?.logoUrl || '',
+    phone: siteSettings?.phone || '',
+    email: siteSettings?.email || '',
+    address: siteSettings?.address || '',
+    academyUrl: siteSettings?.academyUrl || '',
+    customDomain: siteSettings?.customDomain || '',
+  });
+  const [cmsNotice, setCmsNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (siteSettings?.themeVariables) {
-      setCmsNavy(siteSettings.themeVariables.colorNavy || '#111827');
-      setCmsCrimson(siteSettings.themeVariables.colorCrimson || '#0EA5E9');
-      setCmsAmber(siteSettings.themeVariables.colorAmber || '#2DD4BF');
-      setCmsGolden(siteSettings.themeVariables.colorGolden || '#7DD3FC');
-      setCmsDarkBg(siteSettings.themeVariables.colorDarkBg || '#0B1120');
+      setCmsNavy(siteSettings.themeVariables.colorNavy || '#211D70');
+      setCmsCrimson(siteSettings.themeVariables.colorCrimson || '#EA2227');
+      setCmsAmber(siteSettings.themeVariables.colorAmber || '#F8C72E');
+      setCmsGolden(siteSettings.themeVariables.colorGolden || '#F8BE15');
+      setCmsDarkBg(siteSettings.themeVariables.colorDarkBg || '#211C70');
+    }
+    if (siteSettings) {
+      setBrandForm({
+        siteName: siteSettings.siteName || 'SunMedX',
+        tagline: siteSettings.tagline || '',
+        logoUrl: siteSettings.logoUrl || '',
+        phone: siteSettings.phone || '',
+        email: siteSettings.email || '',
+        address: siteSettings.address || '',
+        academyUrl: siteSettings.academyUrl || '',
+        customDomain: siteSettings.customDomain || '',
+      });
     }
   }, [siteSettings]);
 
+  const saveWhiteLabelIdentity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isSuperAdmin && siteSettings?.whiteLabelEnabled === false) {
+      setCmsNotice({ type: 'error', text: 'White-label identity customization is currently locked by Super Admin.' });
+      return;
+    }
+    setLoadingAction('brand');
+    setCmsNotice(null);
+    try {
+      await onUpdateSettings({
+        siteName: brandForm.siteName.trim() || 'SunMedX',
+        tagline: brandForm.tagline.trim(),
+        logoUrl: brandForm.logoUrl.trim(),
+        phone: brandForm.phone.trim(),
+        email: brandForm.email.trim(),
+        address: brandForm.address.trim(),
+        academyUrl: brandForm.academyUrl.trim(),
+        customDomain: brandForm.customDomain.trim(),
+      });
+      await logAdminAction('WHITE_LABEL_BRAND_UPDATE', `Updated portal brand identity to "${brandForm.siteName}"`);
+      setCmsNotice({ type: 'success', text: `Brand identity "${brandForm.siteName}" saved across portal, emails & PDFs.` });
+    } catch (err: any) {
+      setCmsNotice({ type: 'error', text: err?.message || 'Failed saving brand identity.' });
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   const saveCmsColors = async () => {
     setLoadingAction('cms');
+    setCmsNotice(null);
     try {
       await onUpdateSettings({
         themeVariables: {
@@ -871,9 +925,9 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
       document.documentElement.style.setProperty('--color-dark-bg', cmsDarkBg);
 
       await logAdminAction("CMS_THEME_CHANGE", "Admin updated system wide color scheme variables.");
-      alert("Theme variables synced and injected instantly!");
+      setCmsNotice({ type: 'success', text: 'Theme palette synced and injected live across portal.' });
     } catch (e: any) {
-      alert(e.message);
+      setCmsNotice({ type: 'error', text: e?.message || 'Failed updating theme variables.' });
     } finally {
       setLoadingAction(null);
     }
@@ -897,21 +951,264 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
   const totalRevenue = orders.reduce((acc, o) => acc + (o.total || 0), 0);
   const pendingServiceCount = services.filter(s => s.status === 'Pending').length;
   const unansweredQuotesCount = quotations.filter(q => q.status === 'Pending').length;
+  const brandTitle = siteSettings?.siteName?.trim() || 'SunMedX';
+  const roleLabel = isSuperAdmin
+    ? 'Super Admin'
+    : isClientBrandRole(currentUserProfile?.role)
+    ? 'Client Partner'
+    : 'Operations Admin';
+
+  type NavItem = {
+    id: AdminSection;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    group: string;
+    category: 'operations' | 'field' | 'growth' | 'governance';
+    count?: number;
+    desc: string;
+  };
+
+  const allModules: NavItem[] = [
+    {
+      id: 'overview',
+      label: 'Workspace Hub',
+      icon: LayoutGrid,
+      group: 'Workspace',
+      category: 'operations',
+      desc: 'Unified overview of revenue, active modules, and operational activity.',
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            id: 'saas_control' as AdminSection,
+            label: 'SaaS Plans & Owners',
+            icon: Crown,
+            group: 'Workspace',
+            category: 'governance' as const,
+            count: subscriptionPlans.length,
+            desc: 'Configure Free, Pro & Enterprise tiers, module toggles, and Brand Owner rights.',
+          },
+        ]
+      : []),
+    {
+      id: 'users',
+      label: 'Accounts & Roles',
+      icon: Users,
+      group: 'Workspace',
+      category: 'governance',
+      count: usersList.length,
+      desc: 'Manage Customers, Clients, Technicians & Admins with pause, resume & delete.',
+    },
+    {
+      id: 'catalogue',
+      label: 'E-Catalogue CRUD',
+      icon: ShoppingBag,
+      group: 'Commerce & Billing',
+      category: 'operations',
+      count: catalogue.length,
+      desc: 'Add, edit, duplicate, and organize medical devices with INR & RFQ pricing.',
+    },
+    {
+      id: 'quotations',
+      label: 'RFQs & Quotations',
+      icon: FileText,
+      group: 'Commerce & Billing',
+      category: 'operations',
+      count: unansweredQuotesCount > 0 ? unansweredQuotesCount : quotations.length,
+      desc: 'Respond to hospital equipment enquiries with official priced quotes.',
+    },
+    {
+      id: 'orders',
+      label: 'Client Orders',
+      icon: ClipboardList,
+      group: 'Commerce & Billing',
+      category: 'operations',
+      count: orders.length,
+      desc: 'Track completed catalogue checkouts, payment references, and fulfilment.',
+    },
+    {
+      id: 'invoice_generator',
+      label: 'Quote / Invoice Studio',
+      icon: Receipt,
+      group: 'Commerce & Billing',
+      category: 'operations',
+      desc: 'Generate HSN/SAC itemized quotes, proformas & GST tax invoices as PDFs.',
+    },
+    {
+      id: 'payment_gateway',
+      label: 'Payment Gateway',
+      icon: CreditCard,
+      group: 'Commerce & Billing',
+      category: 'governance',
+      desc: 'Configure Razorpay / Stripe public checkout keys and UPI / NEFT details.',
+    },
+    {
+      id: 'ai_worker',
+      label: 'Biomedical AI Worker',
+      icon: Bot,
+      group: 'Biomedical & Field',
+      category: 'field',
+      desc: 'Generate structured device listings, Academy modules & diagnostic helpers.',
+    },
+    {
+      id: 'services',
+      label: 'Service Jobs & Dispatch',
+      icon: Wrench,
+      group: 'Biomedical & Field',
+      category: 'field',
+      count: pendingServiceCount > 0 ? pendingServiceCount : services.length,
+      desc: 'Assign field engineers to hospital calibration & emergency repair visits.',
+    },
+    {
+      id: 'amc_manager',
+      label: 'AMC Plans & Agreements',
+      icon: ShieldAlert,
+      group: 'Biomedical & Field',
+      category: 'field',
+      count: amcContracts.length,
+      desc: 'Configure GST-inclusive AMC tiers, contracts, and one-click client emails.',
+    },
+    {
+      id: 'tools',
+      label: 'Tools Customizer',
+      icon: Settings,
+      group: 'Biomedical & Field',
+      category: 'field',
+      count: tools.length,
+      desc: 'Manage bedside calculators and clinical utility shortcuts.',
+    },
+    {
+      id: 'marketing_social',
+      label: 'Email & Social Manager',
+      icon: Megaphone,
+      group: 'Growth & Content',
+      category: 'growth',
+      desc: 'Import email lists, run outreach campaigns & organize social media posts.',
+    },
+    {
+      id: 'saas_telemetry',
+      label: 'WhatsApp & Lingo',
+      icon: MessageSquare,
+      group: 'Growth & Content',
+      category: 'growth',
+      desc: 'Edit dispatch WhatsApp templates and multi-language portal dictionaries.',
+    },
+    {
+      id: 'messages',
+      label: 'Inbox Messages',
+      icon: Mail,
+      group: 'Growth & Content',
+      category: 'growth',
+      count: messages.length,
+      desc: 'Review inbound hospital contact messages and inquiry threads.',
+    },
+    {
+      id: 'academy',
+      label: 'Academy Manager',
+      icon: BookOpen,
+      group: 'Growth & Content',
+      category: 'growth',
+      count: courses.length,
+      desc: 'Publish Graphy courses and clinical engineering training tracks.',
+    },
+    {
+      id: 'chatbot',
+      label: 'Chatbot FAQ Matrix',
+      icon: Play,
+      group: 'Growth & Content',
+      category: 'growth',
+      count: qaPairs.length,
+      desc: 'Maintain instant automated Q&A responses for portal visitors.',
+    },
+    {
+      id: 'announcements',
+      label: 'Announcements',
+      icon: Sparkles,
+      group: 'Growth & Content',
+      category: 'growth',
+      desc: 'Toggle public banner announcements across customer pages.',
+    },
+    {
+      id: 'cms',
+      label: 'White-Label Studio',
+      icon: Palette,
+      group: 'System & Governance',
+      category: 'governance',
+      desc: 'Customize brand identity, logo URL, theme colors, and homepage layout.',
+    },
+    {
+      id: 'advanced_analytics',
+      label: 'SaaS Metrics',
+      icon: BarChart2,
+      group: 'System & Governance',
+      category: 'governance',
+      desc: 'Monitor operational performance, service throughput & order analytics.',
+    },
+    {
+      id: 'changelog',
+      label: 'Audit Trail',
+      icon: ClipboardList,
+      group: 'System & Governance',
+      category: 'governance',
+      count: changeLogs.length,
+      desc: 'Immutable ledger of administrative role, billing & content updates.',
+    },
+    {
+      id: 'documentation',
+      label: 'Documentation',
+      icon: BookOpenText,
+      group: 'System & Governance',
+      category: 'governance',
+      desc: 'Platform runbook, integration setup guide & compliance reference.',
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            id: 'platform_manager' as AdminSection,
+            label: 'Clone Manager',
+            icon: Sliders,
+            group: 'System & Governance',
+            category: 'governance' as const,
+            desc: 'Export white-label deployment bundles and brand presets.',
+          },
+        ]
+      : []),
+  ];
+
+  const navGroupsList = Array.from(new Set(allModules.map((m) => m.group)));
+  const activeModuleMeta = allModules.find((m) => m.id === activeSection) || allModules[0];
+  const filteredSidebarModules = allModules.filter((m) =>
+    !sidebarSearch.trim()
+      ? true
+      : m.label.toLowerCase().includes(sidebarSearch.trim().toLowerCase()) ||
+        m.group.toLowerCase().includes(sidebarSearch.trim().toLowerCase())
+  );
+  const filteredOverviewModules = allModules.filter((m) => {
+    if (m.id === 'overview') return false;
+    if (overviewCategory !== 'all' && m.category !== overviewCategory) return false;
+    if (sidebarSearch.trim()) {
+      const q = sidebarSearch.trim().toLowerCase();
+      return (
+        m.label.toLowerCase().includes(q) ||
+        m.desc.toLowerCase().includes(q) ||
+        m.group.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   return (
-    <div className="min-h-screen bg-[#0d0d1b] flex flex-col md:flex-row text-gray-200 max-w-full overflow-x-clip">
-      
+    <div className="min-h-[calc(100vh-4rem)] bg-[#F6F7FB] flex flex-col md:flex-row text-slate-900 max-w-full overflow-x-clip">
       {/* COMPACT MOBILE TOP BAR (< md) */}
-      <div className="md:hidden sticky top-16 z-[600] bg-navy border-b border-amber/20 px-4 py-3 flex items-center justify-between gap-3 shadow-lg">
+      <div className="md:hidden sticky top-16 z-[600] bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-syne font-black text-sm text-white tracking-wider">SMEDX</span>
-            <span className="text-[10px] text-amber uppercase bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber/30 font-mono">
-              Admin
-            </span>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="font-syne font-bold text-[#211D70] truncate">{brandTitle}</span>
+            <span aria-hidden="true">·</span>
+            <span className="truncate">{roleLabel}</span>
           </div>
-          <p className="text-[11px] font-mono text-gray-400 truncate mt-0.5">
-            Section: {activeSection.replace(/_/g, ' ')}
+          <p className="text-sm font-syne font-bold text-slate-900 truncate mt-0.5">
+            {activeModuleMeta.label}
           </p>
         </div>
 
@@ -919,239 +1216,494 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
           <button
             type="button"
             onClick={() => setMobileNavOpen((prev) => !prev)}
-            aria-label="Toggle admin sections menu"
-            className="px-3 py-2 rounded-lg bg-[#10101e] border border-amber/30 text-amber text-xs font-syne font-bold flex items-center gap-1.5"
+            aria-label="Toggle workspace navigation"
+            className="px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5"
           >
             {mobileNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            <span>{mobileNavOpen ? 'Close' : 'Modules'}</span>
+            <span>{mobileNavOpen ? 'Close' : 'Workspace'}</span>
           </button>
           <button
             type="button"
             onClick={onLogout}
             title="Sign out"
-            className="p-2 rounded-lg bg-white/5 text-gray-400 hover:text-white hover:bg-red-500/20"
+            className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50"
           >
             <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* LEFT ADMIN SIDEBAR CONTROL PANEL */}
-      <div
+      {/* LEFT SAAS WORKSPACE SIDEBAR (involve.me clean light hierarchy) */}
+      <aside
         className={`${
           mobileNavOpen ? 'flex' : 'hidden'
-        } md:flex w-full md:w-[260px] bg-navy border-b md:border-b-0 md:border-r border-amber/15 flex-col justify-between shrink-0`}
+        } md:flex w-full md:w-[260px] bg-white border-b md:border-b-0 md:border-r border-slate-200 flex-col justify-between shrink-0`}
       >
-        <div>
-          {/* Desktop Brand Logo */}
-          <div className="hidden md:flex p-6 border-b border-white/5 items-center justify-between">
+        <div className="flex flex-col min-h-0">
+          {/* Workspace Brand Header */}
+          <div className="hidden md:flex px-5 py-4 border-b border-slate-200 items-center justify-between gap-2">
             <div className="min-w-0">
-              <h1 className="font-syne font-black text-xl text-white tracking-widest flex items-center gap-2">
-                <span className="text-orange-500 font-extrabold pb-0.5">S</span>
-                <span>
-                  MEDX{' '}
-                  <span
-                    className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${
-                      isSuperAdmin
-                        ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
-                        : 'text-amber bg-amber-500/10 border-amber/30'
-                    }`}
-                  >
-                    {isSuperAdmin ? 'Super Admin ✓' : 'Admin'}
-                  </span>
-                </span>
-              </h1>
-              <p className="text-[10px] text-gray-500 font-mono mt-1 truncate">LOGGED: {adminEmail}</p>
+              <div className="font-syne font-extrabold text-sm text-[#211D70] truncate">
+                {brandTitle} Workspace
+              </div>
+              <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                {roleLabel} · {adminEmail}
+              </div>
             </div>
-            <button onClick={onLogout} title="Log out Administrative block" className="p-1.5 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-red-500/20 transition-all font-mono shrink-0">
+            <button
+              type="button"
+              onClick={onLogout}
+              title="Sign out"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+            >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Nav groups */}
-          <nav className="p-3 sm:p-4 space-y-1 overflow-y-auto max-h-[65vh] md:max-h-none">
-            {((): { id: string; label: string; icon: React.ComponentType<any>; highlight?: boolean }[] => {
-              const baseTabs = [
-                { id: 'overview', label: 'Dashboard Overview', icon: BarChart2 },
-                { id: 'ai_worker', label: 'Biomedical AI Worker', icon: Bot, highlight: true },
-                { id: 'users', label: 'Registered Clients', icon: Users },
-                { id: 'catalogue', label: 'E-Catalogue CRUD', icon: ShoppingBag },
-                { id: 'quotations', label: `RFQs Quotations (${unansweredQuotesCount})`, icon: FileText, highlight: unansweredQuotesCount > 0 },
-                { id: 'orders', label: 'Client Orders', icon: ClipboardList },
-                { id: 'invoice_generator', label: 'Quote / Invoice Generator', icon: Receipt },
-                { id: 'payment_gateway', label: 'Payment Gateway Setup', icon: CreditCard },
-                { id: 'services', label: `Service Jobs & Dispatch (${pendingServiceCount})`, icon: Wrench, highlight: pendingServiceCount > 0 },
-                { id: 'amc_manager', label: `AMC Plans & Agreements`, icon: ShieldAlert },
-                { id: 'marketing_social', label: 'Email & Social Manager', icon: Megaphone },
-                { id: 'saas_telemetry', label: 'WhatsApp & Live Translations', icon: MessageSquare },
-                { id: 'advanced_analytics', label: 'SaaS Advanced Metrics', icon: BarChart2 },
-                { id: 'messages', label: 'Inbox Messages', icon: MessageSquare },
-                { id: 'academy', label: 'Academy Manager', icon: BookOpen },
-                { id: 'tools', label: 'Tools customizer', icon: Settings },
-                { id: 'chatbot', label: 'Public Chatbot FAQ Matrix', icon: Play },
-                { id: 'announcements', label: 'Announcements Marquee', icon: ShieldAlert },
-                { id: 'cms', label: 'CMS Styles Variables', icon: Palette },
-                { id: 'changelog', label: 'Audit Trail logs', icon: ClipboardList },
-                { id: 'documentation', label: 'SunMedX Documentation', icon: BookOpenText }
-              ];
-              if (isSuperAdmin) {
-                baseTabs.push({ id: 'platform_manager', label: 'Platform Manager', icon: Settings });
-              }
-              return baseTabs;
-            })().map((s) => {
-              const IconComp = s.icon;
+          {/* Instant Module Search */}
+          <div className="px-4 pt-4 pb-2">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={sidebarSearch}
+                onChange={(e) => setSidebarSearch(e.target.value)}
+                placeholder="Search workspace..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#211D70] focus:bg-white transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Grouped Navigation */}
+          <nav aria-label="Backend workspace modules" className="px-3 py-2 space-y-4 overflow-y-auto max-h-[65vh] md:max-h-[calc(100vh-14rem)]">
+            {navGroupsList.map((groupName) => {
+              const items = filteredSidebarModules.filter((m) => m.group === groupName);
+              if (items.length === 0) return null;
               return (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    setActiveSection(s.id as AdminSection);
-                    setMobileNavOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-left text-xs font-semibold tracking-wide font-syne uppercase select-none transition-all ${
-                    activeSection === s.id
-                      ? 'bg-gradient-to-r from-crimson to-amber text-navy font-bold shadow-lg shadow-crimson/15'
-                      : 'text-gray-400 hover:bg-neutral-800/20 hover:text-white'
-                  }`}
-                >
-                  <IconComp className="w-4 h-4 shrink-0" />
-                  <span className="flex-1 truncate">{s.label}</span>
-                  {s.highlight && <span className="w-2 h-2 rounded-full bg-red-500 animate-ping shrink-0" />}
-                </button>
+                <div key={groupName} className="space-y-1">
+                  <div className="px-2.5 text-[11px] font-semibold text-slate-400">
+                    {groupName}
+                  </div>
+                  <div className="space-y-0.5">
+                    {items.map((item) => {
+                      const IconComp = item.icon;
+                      const isActive = activeSection === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveSection(item.id);
+                            setMobileNavOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-xs font-medium transition-colors whitespace-nowrap ${
+                            isActive
+                              ? 'bg-[#211D70]/10 text-[#211D70] font-semibold'
+                              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                          }`}
+                        >
+                          <IconComp className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#211D70]' : 'text-slate-400'}`} />
+                          <span className="flex-1 truncate">{item.label}</span>
+                          {typeof item.count === 'number' && (
+                            <span
+                              className={`text-[11px] font-mono tabular-nums ${
+                                isActive ? 'text-[#211D70]' : 'text-slate-400'
+                              }`}
+                            >
+                              {item.count}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </nav>
         </div>
 
-        {/* Footer info lock */}
-        <div className="p-4 bg-black/40 border-t border-white/5 text-[10px] text-gray-500 font-mono text-center">
-          Mumbai Calibration Facility • v2.10
+        {/* Clean Sidebar Footer */}
+        <div className="p-3 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2 text-xs">
+          <a
+            href="#home"
+            className="text-slate-600 hover:text-[#211D70] font-medium inline-flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white transition-colors"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>Live Site</span>
+          </a>
+          <a
+            href="#customer-portal"
+            className="text-slate-600 hover:text-[#211D70] font-medium px-2 py-1 rounded-md hover:bg-white transition-colors"
+          >
+            Client Hub
+          </a>
         </div>
-      </div>
+      </aside>
 
-      {/* RIGHT WORK AREA */}
-      <div className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-10 space-y-6 sm:space-y-8">
-        
-        {/* OVERVIEW MODULE */}
-        {activeSection === 'overview' && (
-          <div className="space-y-6 animate-fadeIn">
-            <div>
-              <h2 className="font-syne font-black text-2xl text-white uppercase tracking-wider">Dashboard KPI Overview</h2>
-              <p className="text-xs text-amber font-mono">Telemetry metrics and logs analyzer counters</p>
-            </div>
+      {/* RIGHT MAIN WORKSPACE */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Top Breadcrumb & Primary Action Bar (involve.me contract) */}
+        <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-xs text-slate-500 min-w-0">
+            <button
+              type="button"
+              onClick={() => setActiveSection('overview')}
+              className="hover:text-[#211D70] font-medium transition-colors"
+            >
+              Workspace
+            </button>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="hidden sm:inline truncate">{activeModuleMeta.group}</span>
+            <ChevronRight className="hidden sm:inline w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="font-semibold text-slate-900 truncate">{activeModuleMeta.label}</span>
+          </div>
 
-            {/* Widget Row */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-              {[
-                { label: 'Total Sales Generated', value: `Rs ${totalRevenue.toLocaleString()}`, color: 'border-emerald-500/20 text-emerald-400' },
-                { label: 'Registered Hospital Users', value: usersList.length, color: 'border-blue-500/20 text-blue-400' },
-                { label: 'Unanswered Hospital Quotes', value: unansweredQuotesCount, color: 'border-red-500/20 text-red-400', urgent: unansweredQuotesCount > 0 },
-                { label: 'Equipment Catalogue Items', value: catalogue.length, color: 'border-amber-500/20 text-amber' }
-              ].map((w, idx) => (
-                <div key={idx} className={`bg-navy border rounded-2xl p-5 shadow-xl flex flex-col justify-between ${w.color} ${w.urgent ? 'animate-pulse' : ''}`}>
-                  <span className="text-[10px] uppercase font-mono font-bold text-gray-500 tracking-wider mb-2">{w.label}</span>
-                  <span className="text-2xl font-black font-syne">{w.value}</span>
-                </div>
-              ))}
-            </div>
+          <div className="flex items-center gap-2.5 shrink-0 relative">
+            {activeSection !== 'overview' && (
+              <button
+                type="button"
+                onClick={() => setActiveSection('overview')}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 whitespace-nowrap"
+              >
+                All Modules
+              </button>
+            )}
 
-            {/* Simulated charting bar or lists */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="bg-navy border border-white/5 rounded-2xl p-6 shadow-xl">
-                <h3 className="font-syne font-bold text-sm text-gray-300 uppercase tracking-widest mb-4">Operations Status Distribution</h3>
-                <div className="space-y-4">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setQuickCreateOpen((prev) => !prev)}
+                className="px-3.5 py-2 rounded-lg bg-[#211D70] hover:bg-[#1a1658] text-white text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shadow-xs transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Quick Create</span>
+                <ChevronDown className="w-3.5 h-3.5 opacity-80" />
+              </button>
+
+              {quickCreateOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-lg p-1.5 z-[750]">
                   {[
-                    { label: 'Completed Calibration requests', count: services.filter(s => s.status === 'Completed').length, total: services.length, color: 'bg-emerald-500' },
-                    { label: 'Pending Dispatch Scheduler', count: services.filter(s => s.status === 'Pending').length, total: services.length, color: 'bg-red-500' },
-                    { label: 'Active repair contract loops', count: services.filter(s => s.status === 'In Progress').length, total: services.length, color: 'bg-amber-400' }
-                  ].map((item, idx) => {
-                    const pct = item.total > 0 ? (item.count / item.total) * 100 : 0;
-                    return (
-                      <div key={idx} className="space-y-1.5">
-                        <div className="flex justify-between text-xs font-mono">
-                          <span className="text-gray-400">{item.label}</span>
-                          <span className="font-bold text-white">{item.count} / {item.total} ({pct.toFixed(0)}%)</span>
-                        </div>
-                        <div className="h-2 w-full bg-neutral-900 rounded-full overflow-hidden">
-                          <div className={`h-full ${item.color} rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
+                    {
+                      label: 'New Equipment Item',
+                      action: () => {
+                        setActiveSection('catalogue');
+                        openNewProductModal();
+                      },
+                    },
+                    {
+                      label: 'New AMC Agreement',
+                      action: () => {
+                        setActiveSection('amc_manager');
+                        setShowContractModal(true);
+                      },
+                    },
+                    {
+                      label: 'New Quote / GST Invoice',
+                      action: () => setActiveSection('invoice_generator'),
+                    },
+                    {
+                      label: 'Manage Accounts & Roles',
+                      action: () => setActiveSection('users'),
+                    },
+                    {
+                      label: 'Launch Email Campaign',
+                      action: () => setActiveSection('marketing_social'),
+                    },
+                  ].map((shortcut) => (
+                    <button
+                      key={shortcut.label}
+                      type="button"
+                      onClick={() => {
+                        setQuickCreateOpen(false);
+                        shortcut.action();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-100 hover:text-[#211D70] transition-colors"
+                    >
+                      {shortcut.label}
+                    </button>
+                  ))}
                 </div>
-              </div>
+              )}
+            </div>
+          </div>
+        </div>
 
-              {/* Quick changes logger stream */}
-              <div className="bg-navy border border-white/5 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
-                <div>
-                  <h3 className="font-syne font-bold text-sm text-gray-300 uppercase tracking-widest mb-3">Live Administrative audit</h3>
-                  <div className="space-y-3.5 max-h-[220px] overflow-y-auto">
-                    {changeLogs.slice(0, 5).map((l) => (
-                      <div key={l.id} className="text-xs bg-[#10101e] p-2.5 rounded-lg border border-white/5 flex items-start gap-2.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                        <div>
-                          <div className="font-mono text-[10px] text-gray-500">{new Date(l.timestamp).toLocaleTimeString()} - {l.adminEmail}</div>
-                          <p className="text-gray-200 font-semibold mt-0.5">{l.details}</p>
-                        </div>
-                      </div>
+        {/* Workspace Viewport */}
+        <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1440px] w-full mx-auto">
+          <div
+            className={
+              activeSection === 'overview'
+                ? 'space-y-6'
+                : 'bg-[#0F1426] text-gray-200 rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-7 space-y-6'
+            }
+          >
+            {/* OVERVIEW WORKSPACE HUB (involve.me style Light SaaS Workspace) */}
+            {activeSection === 'overview' && (
+              <div className="space-y-6 page-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                  <div>
+                    <h1 className="font-syne font-bold text-2xl text-slate-900 tracking-tight">
+                      {brandTitle} Operations Workspace
+                    </h1>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      Manage equipment commerce, hospital service dispatch, AMC contracts, and white-label governance.
+                    </p>
+                  </div>
+
+                  {/* Category Filter Tabs */}
+                  <div className="flex flex-wrap items-center gap-1 p-1 bg-white border border-slate-200 rounded-xl self-start">
+                    {[
+                      { id: 'all', label: 'All Modules' },
+                      { id: 'operations', label: 'Commerce' },
+                      { id: 'field', label: 'Field & AI' },
+                      { id: 'growth', label: 'Growth' },
+                      { id: 'governance', label: 'Governance' },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setOverviewCategory(tab.id as any)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                          overviewCategory === tab.id
+                            ? 'bg-[#211D70] text-white'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
                     ))}
                   </div>
                 </div>
+
+                {/* Single-Elevation 4-Metric KPI Strip */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    {
+                      label: 'Total Order Revenue',
+                      value: `Rs ${totalRevenue.toLocaleString()}`,
+                      sub: `${orders.length} paid orders`,
+                      accent: 'text-emerald-700',
+                    },
+                    {
+                      label: 'Registered Accounts',
+                      value: usersList.length,
+                      sub: `${usersList.filter((u) => u.accountStatus === 'paused').length} paused`,
+                      accent: 'text-[#211D70]',
+                    },
+                    {
+                      label: 'Open Quotes & Jobs',
+                      value: unansweredQuotesCount + pendingServiceCount,
+                      sub: `${unansweredQuotesCount} RFQs · ${pendingServiceCount} dispatch`,
+                      accent: unansweredQuotesCount + pendingServiceCount > 0 ? 'text-amber-700' : 'text-slate-900',
+                    },
+                    {
+                      label: 'Catalogue & AMC Units',
+                      value: catalogue.length + amcContracts.length,
+                      sub: `${catalogue.length} devices · ${amcContracts.length} contracts`,
+                      accent: 'text-slate-900',
+                    },
+                  ].map((kpi) => (
+                    <div
+                      key={kpi.label}
+                      className="bg-white border border-slate-200 rounded-xl p-5 space-y-1.5"
+                    >
+                      <div className="text-xs font-medium text-slate-500">{kpi.label}</div>
+                      <div className={`text-2xl font-syne font-bold tabular-nums ${kpi.accent}`}>
+                        {kpi.value}
+                      </div>
+                      <div className="text-xs text-slate-500 font-mono tabular-nums">{kpi.sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Scalable Digital Modules Grid */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-syne font-bold text-base text-slate-900">
+                      Workspace Modules ({filteredOverviewModules.length})
+                    </h2>
+                    {sidebarSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setSidebarSearch('')}
+                        className="text-xs font-medium text-[#211D70] hover:underline"
+                      >
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
+
+                  {filteredOverviewModules.length === 0 ? (
+                    <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-2">
+                      <p className="text-sm font-medium text-slate-700">No modules match your search filter.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSidebarSearch('');
+                          setOverviewCategory('all');
+                        }}
+                        className="px-4 py-2 rounded-lg bg-[#211D70] text-white text-xs font-semibold"
+                      >
+                        Show All Modules
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {filteredOverviewModules.map((mod) => {
+                        const ModIcon = mod.icon;
+                        return (
+                          <button
+                            key={mod.id}
+                            type="button"
+                            onClick={() => setActiveSection(mod.id)}
+                            className="text-left bg-white border border-slate-200 hover:border-[#211D70]/50 rounded-xl p-5 transition-colors flex flex-col justify-between gap-4 group"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-slate-100 group-hover:bg-[#211D70] text-[#211D70] group-hover:text-white flex items-center justify-center transition-colors shrink-0">
+                                  <ModIcon className="w-5 h-5" />
+                                </div>
+                                <div className="text-xs text-slate-500 font-mono tabular-nums">
+                                  {mod.group}
+                                  {typeof mod.count === 'number' ? ` · ${mod.count}` : ''}
+                                </div>
+                              </div>
+                              <div>
+                                <h3 className="font-syne font-bold text-sm text-slate-900 group-hover:text-[#211D70]">
+                                  {mod.label}
+                                </h3>
+                                <p className="text-xs text-slate-500 leading-relaxed mt-1">
+                                  {mod.desc}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#211D70]">
+                              <span>Open workspace</span>
+                              <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Operations Pipeline & Recent Audit Activity */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <h3 className="font-syne font-bold text-sm text-slate-900">
+                        Service Dispatch Pipeline
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSection('services')}
+                        className="text-xs font-semibold text-[#211D70] hover:underline"
+                      >
+                        Manage Jobs
+                      </button>
+                    </div>
+                    <div className="space-y-4">
+                      {[
+                        {
+                          label: 'Completed Calibrations',
+                          count: services.filter((s) => s.status === 'Completed').length,
+                          total: services.length,
+                          color: 'bg-emerald-600',
+                        },
+                        {
+                          label: 'Pending Field Dispatch',
+                          count: services.filter((s) => s.status === 'Pending').length,
+                          total: services.length,
+                          color: 'bg-red-600',
+                        },
+                        {
+                          label: 'In-Progress Service Visits',
+                          count: services.filter((s) => s.status === 'In Progress').length,
+                          total: services.length,
+                          color: 'bg-amber-500',
+                        },
+                      ].map((item) => {
+                        const pct = item.total > 0 ? (item.count / item.total) * 100 : 0;
+                        return (
+                          <div key={item.label} className="space-y-1.5">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-600 font-medium">{item.label}</span>
+                              <span className="font-mono font-semibold text-slate-900 tabular-nums">
+                                {item.count} / {item.total} ({pct.toFixed(0)}%)
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${item.color} rounded-full transition-all duration-300`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <h3 className="font-syne font-bold text-sm text-slate-900">
+                        Recent Workspace Activity
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSection('changelog')}
+                        className="text-xs font-semibold text-[#211D70] hover:underline"
+                      >
+                        Full Audit Log
+                      </button>
+                    </div>
+                    {changeLogs.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-6 text-center">
+                        Administrative actions will appear here automatically.
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-slate-100 max-h-[220px] overflow-y-auto">
+                        {changeLogs.slice(0, 6).map((l) => (
+                          <div key={l.id} className="py-2.5 text-xs space-y-0.5">
+                            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+                              <span className="truncate">{l.adminEmail}</span>
+                              <span className="shrink-0 tabular-nums">
+                                {new Date(l.timestamp).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <p className="text-slate-800 font-medium">{l.details}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+
+        {/* SUPER ADMIN EXCLUSIVE SAAS CONTROL PLANE */}
+        {activeSection === 'saas_control' && isSuperAdmin && (
+          <SuperAdminSaasConsole
+            adminEmail={adminEmail}
+            siteSettings={siteSettings}
+            onUpdateSettings={onUpdateSettings}
+            usersList={usersList}
+            subscriptionPlans={subscriptionPlans}
+            logAdminAction={logAdminAction}
+          />
         )}
 
-        {/* REGISTERED USERS */}
+        {/* REGISTERED ACCOUNTS, ROLES & GOVERNANCE */}
         {activeSection === 'users' && (
-          <div className="bg-navy border border-white/5 rounded-2xl p-6 shadow-2xl space-y-6 animate-fadeIn">
-            <div>
-              <h2 className="font-syne font-black text-xl text-white uppercase tracking-wider">Registered Client profiles</h2>
-              <p className="text-xs text-amber font-mono">Review client hospital units and manage administrative authentication clearances</p>
-            </div>
-
-            <div className="overflow-x-auto border border-white/5 bg-[#10101e] rounded-xl">
-              <table className="w-full text-xs text-left divide-y divide-white/5 text-gray-300">
-                <thead>
-                  <tr className="bg-navy text-gray-400 font-mono py-4">
-                    <th className="p-4 font-bold">Client Email</th>
-                    <th className="p-4 font-bold">Full Name</th>
-                    <th className="p-4 font-bold">Affiliated Hospital</th>
-                    <th className="p-4 font-bold">Contact Phone</th>
-                    <th className="p-4 font-bold text-center">Portal role Privilege</th>
-                    <th className="p-4 font-bold text-right">Switch clearances</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {usersList.map((u) => (
-                    <tr key={u.uid} className="hover:bg-white/2">
-                      <td className="p-4 font-mono font-bold text-white">{u.email}</td>
-                      <td className="p-4 font-semibold">{u.name || 'Anonymous User'}</td>
-                      <td className="p-4 text-amber font-semibold">{u.hospital || 'Not Specified'}</td>
-                      <td className="p-4 font-mono">{u.phone || 'No phone logged'}</td>
-                      <td className="p-4 text-center">
-                        <span className={`px-3 py-1 rounded-full text-[9px] font-black font-mono uppercase tracking-wider border ${
-                          u.role === 'admin'
-                            ? 'bg-red-500/15 border-red-500/30 text-red-500'
-                            : 'bg-blue-500/15 border-blue-500/30 text-blue-400'
-                        }`}>
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <button
-                          onClick={() => toggleUserRole(u.uid, u.role, u.email)}
-                          disabled={u.email === adminEmail}
-                          className="px-3 py-1.5 rounded-lg border border-orange-500/20 text-amber hover:bg-orange-500/10 text-[10px] font-bold uppercase transition-all disabled:opacity-30"
-                        >
-                          Revoke / Promote
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <UserAccountsManager
+            adminEmail={adminEmail}
+            isSuperAdmin={isSuperAdmin}
+            usersList={usersList}
+            logAdminAction={logAdminAction}
+            onOpenSaasConsole={isSuperAdmin ? () => setActiveSection('saas_control') : undefined}
+          />
         )}
 
         {/* CATALOGUE CRUD (Managed Workspace + Clean Modal Editor Window) */}
@@ -2135,91 +2687,224 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
           </div>
         )}
 
-        {/* CMS VARIABLES & PORTAL LAYOUT CUSTOMIZER */}
+        {/* BRAND OWNER WHITE-LABEL STUDIO & PORTAL LAYOUT CUSTOMIZER */}
         {activeSection === 'cms' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-fadeIn">
-            {/* Theme Variables Color customization */}
-            <div className="bg-navy rounded-2xl border border-white/5 p-6 shadow-xl h-fit space-y-6">
+          <div className="space-y-6 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
               <div>
-                <h3 className="font-syne font-black text-sm text-amber uppercase tracking-wider">CMS System Theme Customizer</h3>
-                <p className="text-[11px] text-gray-500 font-mono leading-relaxed mt-0.5">Modifies :root CSS variables in real-time across database nodes</p>
+                <h2 className="font-syne font-black text-xl text-white uppercase tracking-wider">
+                  White-Label Brand Studio
+                </h2>
+                <p className="text-xs text-amber font-mono">
+                  Customize brand identity, logo, colors, contact details &amp; homepage modules for this Brand Owner portal
+                </p>
               </div>
-
-              <div className="space-y-4">
-                {[
-                  { label: 'Primary Brand Navy Background', val: cmsNavy, set: setCmsNavy },
-                  { label: 'Sunset Crimson Gradient Color', val: cmsCrimson, set: setCmsCrimson },
-                  { label: 'Sunrise Amber Accent Color', val: cmsAmber, set: setCmsAmber },
-                  { label: 'Horizon Golden glow Badge color', val: cmsGolden, set: setCmsGolden },
-                  { label: 'Container Slate Backing DarkBg', val: cmsDarkBg, set: setCmsDarkBg }
-                ].map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between bg-[#10101e] p-3 rounded-xl border border-white/5">
-                    <span className="text-xs font-semibold text-gray-300 font-syne">{item.label}</span>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="color"
-                        value={item.val}
-                        onChange={(e) => item.set(e.target.value)}
-                        className="w-10 h-10 border-0 bg-transparent rounded-full overflow-hidden cursor-pointer shadow-xl outline-none shrink-0"
-                      />
-                      <input
-                        type="text"
-                        value={item.val}
-                        onChange={(e) => item.set(e.target.value)}
-                        className="bg-[#121224] border border-orange-500/20 text-white rounded px-2.5 py-1 text-xs font-mono w-24 text-center select-all"
-                      />
-                    </div>
-                  </div>
-                ))}
-
-                <button
-                  onClick={saveCmsColors}
-                  disabled={loadingAction === 'cms'}
-                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-crimson to-amber hover:opacity-90 active:scale-95 text-navy font-bold uppercase text-xs tracking-wider transition-all shadow-lg shadow-crimson/15 flex items-center justify-center gap-1.5"
-                >
-                  {loadingAction === 'cms' ? <RefreshCw className="w-4.5 h-4.5 animate-spin" /> : <Palette className="w-4.5 h-4.5" />}
-                  <span>Save Brand CSS variables</span>
-                </button>
+              <div className="text-[11px] font-mono text-gray-300 bg-navy border border-white/10 px-3 py-2 rounded-xl">
+                Owner License: <span className="text-amber font-bold uppercase">{siteSettings?.ownerPlanId || 'enterprise'}</span>
               </div>
             </div>
 
-            {/* Layout Toggling CMS */}
-            <div className="bg-navy rounded-2xl border border-white/5 p-6 shadow-xl h-fit space-y-6">
-              <div>
-                <h3 className="font-syne font-black text-sm text-amber uppercase tracking-wider">Interface Sections Configurator</h3>
-                <p className="text-[11px] text-gray-500 font-mono mt-0.5">Toggle and align structural home landing components</p>
+            {cmsNotice && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-center justify-between ${
+                  cmsNotice.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-red-500/10 border-red-500/30 text-red-300'
+                }`}
+              >
+                <span>{cmsNotice.text}</span>
+                <button type="button" onClick={() => setCmsNotice(null)} className="underline text-[11px] ml-3">
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* White-Label Identity Card */}
+            <form onSubmit={saveWhiteLabelIdentity} className="bg-navy rounded-2xl border border-white/10 p-6 shadow-xl space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+                <div>
+                  <h3 className="font-syne font-black text-sm text-amber uppercase tracking-wider">
+                    Brand Identity, Logo &amp; Contact Overrides
+                  </h3>
+                  <p className="text-[11px] text-gray-400 font-mono">
+                    Applies dynamically to Navbar, Home Page, Client Hub, Policies, Emails &amp; Generated PDFs.
+                  </p>
+                </div>
+                {!isSuperAdmin && siteSettings?.whiteLabelEnabled === false && (
+                  <span className="text-[11px] font-mono text-red-300">Locked by Super Admin</span>
+                )}
               </div>
 
-              <div className="space-y-3 font-mono text-xs">
-                {[
-                  { key: 'hero', title: 'Interactive animated Conic Rays Hero section' },
-                  { key: 'stats', title: 'Hospital Client Growth Counter Stats board' },
-                  { key: 'services_preview', title: 'Main 3-Service featured options slider' },
-                  { key: 'academy_preview', title: 'Course certification featured cards' },
-                  { key: 'tools_preview', title: 'Dynamic clinical custom tools panel' },
-                  { key: 'testimonials', title: 'Rotating hospital testimonials slider carousel' }
-                ].map((s) => {
-                  const isActive = siteSettings?.homepageOrder?.includes(s.key);
-                  return (
-                    <div
-                      key={s.key}
-                      onClick={() => handleToggleSection(s.key)}
-                      className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                        isActive
-                          ? 'bg-[#12122c]/60 border-amber-500/40 text-white font-bold'
-                          : 'bg-black/20 border-white/5 text-gray-500 hover:border-white/10'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase font-bold text-amber">{s.key}</span>
-                        <p className="text-[11px] text-gray-300">{s.title}</p>
-                      </div>
-                      <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${isActive ? 'bg-orange-500' : 'bg-gray-800'}`}>
-                        <div className={`w-3 h-3 rounded-full bg-white transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">Portal Brand Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={brandForm.siteName}
+                    onChange={(e) => setBrandForm({ ...brandForm, siteName: e.target.value })}
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">Custom Domain Label</label>
+                  <input
+                    type="text"
+                    value={brandForm.customDomain}
+                    onChange={(e) => setBrandForm({ ...brandForm, customDomain: e.target.value })}
+                    placeholder="portal.yourbrand.in"
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">Support Phone</label>
+                  <input
+                    type="text"
+                    value={brandForm.phone}
+                    onChange={(e) => setBrandForm({ ...brandForm, phone: e.target.value })}
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">Support Email</label>
+                  <input
+                    type="email"
+                    value={brandForm.email}
+                    onChange={(e) => setBrandForm({ ...brandForm, email: e.target.value })}
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">City / Office Address</label>
+                  <input
+                    type="text"
+                    value={brandForm.address}
+                    onChange={(e) => setBrandForm({ ...brandForm, address: e.target.value })}
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">Academy Portal URL</label>
+                  <input
+                    type="text"
+                    value={brandForm.academyUrl}
+                    onChange={(e) => setBrandForm({ ...brandForm, academyUrl: e.target.value })}
+                    className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">Brand Tagline</label>
+                <input
+                  type="text"
+                  value={brandForm.tagline}
+                  onChange={(e) => setBrandForm({ ...brandForm, tagline: e.target.value })}
+                  className="w-full bg-[#10101e] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                />
+              </div>
+
+              <ImageAttachmentField
+                value={brandForm.logoUrl}
+                onChange={(url) => setBrandForm({ ...brandForm, logoUrl: url })}
+                label="White-Label Brand Logo (PNG / SVG / Photo)"
+              />
+
+              <button
+                type="submit"
+                disabled={loadingAction === 'brand'}
+                className="px-6 py-3 rounded-xl bg-gradient-to-r from-crimson to-amber text-navy font-syne font-black text-xs uppercase tracking-wider inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                {loadingAction === 'brand' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Save White-Label Brand Identity</span>
+              </button>
+            </form>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Theme Variables Color customization */}
+              <div className="bg-navy rounded-2xl border border-white/5 p-6 shadow-xl h-fit space-y-6">
+                <div>
+                  <h3 className="font-syne font-black text-sm text-amber uppercase tracking-wider">CMS System Theme Customizer</h3>
+                  <p className="text-[11px] text-gray-500 font-mono leading-relaxed mt-0.5">Modifies :root CSS variables in real-time across portal views</p>
+                </div>
+
+                <div className="space-y-4">
+                  {[
+                    { label: 'Primary Brand Navy Background', val: cmsNavy, set: setCmsNavy },
+                    { label: 'Sunset Crimson Gradient Color', val: cmsCrimson, set: setCmsCrimson },
+                    { label: 'Sunrise Amber Accent Color', val: cmsAmber, set: setCmsAmber },
+                    { label: 'Horizon Golden glow Badge color', val: cmsGolden, set: setCmsGolden },
+                    { label: 'Container Slate Backing DarkBg', val: cmsDarkBg, set: setCmsDarkBg }
+                  ].map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-[#10101e] p-3 rounded-xl border border-white/5">
+                      <span className="text-xs font-semibold text-gray-300 font-syne">{item.label}</span>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="color"
+                          value={item.val}
+                          onChange={(e) => item.set(e.target.value)}
+                          className="w-10 h-10 border-0 bg-transparent rounded-full overflow-hidden cursor-pointer shadow-xl outline-none shrink-0"
+                        />
+                        <input
+                          type="text"
+                          value={item.val}
+                          onChange={(e) => item.set(e.target.value)}
+                          className="bg-[#121224] border border-orange-500/20 text-white rounded px-2.5 py-1 text-xs font-mono w-24 text-center select-all"
+                        />
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
+
+                  <button
+                    onClick={saveCmsColors}
+                    disabled={loadingAction === 'cms'}
+                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-crimson to-amber hover:opacity-90 active:scale-95 text-navy font-bold uppercase text-xs tracking-wider transition-all shadow-lg shadow-crimson/15 flex items-center justify-center gap-1.5"
+                  >
+                    {loadingAction === 'cms' ? <RefreshCw className="w-4.5 h-4.5 animate-spin" /> : <Palette className="w-4.5 h-4.5" />}
+                    <span>Save Brand CSS variables</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Layout Toggling CMS */}
+              <div className="bg-navy rounded-2xl border border-white/5 p-6 shadow-xl h-fit space-y-6">
+                <div>
+                  <h3 className="font-syne font-black text-sm text-amber uppercase tracking-wider">Interface Sections Configurator</h3>
+                  <p className="text-[11px] text-gray-500 font-mono mt-0.5">Toggle home landing sections including Subscription Plans</p>
+                </div>
+
+                <div className="space-y-3 font-mono text-xs">
+                  {[
+                    { key: 'hero', title: 'Interactive Hero Banner & Quick Enquiry' },
+                    { key: 'stats', title: 'Hospital Client Growth Counter Stats board' },
+                    { key: 'services_preview', title: 'Main 3-Service featured options grid' },
+                    { key: 'plans_preview', title: 'Free / Pro / Enterprise Subscription Tiers' },
+                    { key: 'academy_preview', title: 'Course certification featured cards' },
+                    { key: 'tools_preview', title: 'Dynamic clinical custom tools panel' },
+                    { key: 'testimonials', title: 'Rotating hospital testimonials carousel' }
+                  ].map((s) => {
+                    const isActive = siteSettings?.homepageOrder?.includes(s.key);
+                    return (
+                      <div
+                        key={s.key}
+                        onClick={() => handleToggleSection(s.key)}
+                        className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                          isActive
+                            ? 'bg-[#12122c]/60 border-amber-500/40 text-white font-bold'
+                            : 'bg-black/20 border-white/5 text-gray-500 hover:border-white/10'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase font-bold text-amber">{s.key}</span>
+                          <p className="text-[11px] text-gray-300">{s.title}</p>
+                        </div>
+                        <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${isActive ? 'bg-orange-500' : 'bg-gray-800'}`}>
+                          <div className={`w-3 h-3 rounded-full bg-white transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -3669,18 +4354,20 @@ export default function AdminPanel({ adminEmail, onLogout, siteSettings, onUpdat
           </div>
         )}
 
+          </div>
+        </div>
       </div>
 
-      {/* FLOATING ADMIN BIOMEDICAL AI WORKER TRIGGER */}
+      {/* QUICK AI WORKER SHORTCUT */}
       {activeSection !== 'ai_worker' && (
         <button
           type="button"
           onClick={() => setActiveSection('ai_worker')}
-          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[990] bg-gradient-to-r from-crimson to-amber text-navy px-4 py-2.5 sm:px-5 sm:py-3 rounded-full font-syne font-black text-xs flex items-center gap-2 shadow-2xl hover:scale-105 active:scale-95 transition-all border border-amber/60"
+          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[990] bg-[#211D70] hover:bg-[#1a1658] text-white px-4 py-2.5 rounded-xl font-syne font-semibold text-xs flex items-center gap-2 shadow-lg border border-white/15 transition-colors"
         >
-          <Sparkles className="w-4 h-4 shrink-0" />
+          <Bot className="w-4 h-4 text-[#F8C72E] shrink-0" />
           <span className="sm:hidden">AI Worker</span>
-          <span className="hidden sm:inline">SunMedX AI Worker</span>
+          <span className="hidden sm:inline">Biomedical AI Worker</span>
         </button>
       )}
     </div>

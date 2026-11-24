@@ -16,7 +16,9 @@ import {
 import { getDb } from './services/dataClient';
 import { getAuth, AuthUser } from './services/authService';
 import { checkAndSeedDatabase, SITE_NAME } from './config/seed';
-import { CartItem, Product, SiteSettings } from './types';
+import { DEFAULT_SUBSCRIPTION_PLANS, getCurrentMonthKey, getEffectiveAiUsage, resolveUserPlan } from './config/plans';
+import { isAdminWorkspaceRole, isSuperAdminEmail } from './config/roles';
+import { CartItem, Product, SiteSettings, SubscriptionPlan, UserProfile } from './types';
 
 // Decoupled Page imports
 import Home from './pages/Home';
@@ -72,10 +74,33 @@ export default function App() {
   const [userId, setUserId] = useState<string>('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [userRole, setUserRole] = useState<string>('customer');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>(DEFAULT_SUBSCRIPTION_PLANS);
+  const [authNotice, setAuthNotice] = useState<string>('');
+  const hadUserDocRef = useRef<boolean>(false);
 
   const [tools, setTools] = useState<any[]>([]);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   const toolsDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const db = getDb();
+    const unsub = db.collection('subscription_plans').onSnapshot(
+      (snap: any) => {
+        const list: SubscriptionPlan[] = [];
+        snap.forEach((doc: any) => {
+          list.push({ id: doc.id, ...doc.data() } as SubscriptionPlan);
+        });
+        if (list.length > 0) {
+          const order: Record<string, number> = { free: 0, pro: 1, enterprise: 2 };
+          list.sort((a, b) => (order[a.id] ?? 99) - (order[b.id] ?? 99));
+          setSubscriptionPlans(list);
+        }
+      },
+      (err: any) => console.error('Plans subscription error:', err)
+    );
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const db = getDb();
@@ -110,17 +135,24 @@ export default function App() {
       if (user) {
         const email = (user.email || '').toLowerCase().trim();
         const role = user.role || 'customer';
+        hadUserDocRef.current = false;
         setUserEmail(email);
         setUserId(user.uid || '');
         setUserRole(role);
-        if (role === 'admin' || role === 'superadmin' || email === 'admin@sunmedx.in' || email === 'krishnadigitalai@gmail.com') {
+        if (
+          isAdminWorkspaceRole(role) ||
+          email === 'admin@sunmedx.in' ||
+          isSuperAdminEmail(email)
+        ) {
           setIsAdmin(true);
         } else {
           setIsAdmin(false);
         }
       } else {
+        hadUserDocRef.current = false;
         setUserEmail('');
         setUserId('');
+        setUserProfile(null);
         setIsAdmin(false);
         setUserRole('customer');
       }
@@ -132,7 +164,9 @@ export default function App() {
 
   useEffect(() => {
     if (!userEmail) {
+      hadUserDocRef.current = false;
       setUserRole('customer');
+      setUserProfile(null);
       return;
     }
     const db = getDb();
@@ -141,20 +175,66 @@ export default function App() {
       .where('email', '==', userEmail)
       .onSnapshot(
         (snap: any) => {
+          const isConfiguredOwner =
+            Boolean(siteSettings?.ownerEmail) &&
+            siteSettings!.ownerEmail!.toLowerCase().trim() === userEmail;
+
           if (!snap.empty) {
+            hadUserDocRef.current = true;
             let foundRole = 'customer';
+            let matchedProfile: UserProfile | null = null;
             snap.forEach((doc: any) => {
               const data = doc.data();
+              matchedProfile = { uid: doc.id, ...data } as UserProfile;
               if (data && data.role) foundRole = data.role;
             });
+
+            if (matchedProfile && !isSuperAdminEmail(userEmail) && (matchedProfile as UserProfile).accountStatus === 'paused') {
+              const reason = (matchedProfile as UserProfile).pausedReason;
+              setAuthNotice(
+                reason
+                  ? `Your account has been paused by Super Admin: ${reason}`
+                  : 'Your account has been paused by Super Admin. Please contact support.'
+              );
+              getAuth().signOut().catch(() => {});
+              setUserEmail('');
+              setUserId('');
+              setUserProfile(null);
+              setIsAdmin(false);
+              setUserRole('customer');
+              window.location.hash = '#auth';
+              return;
+            }
+
+            if (isConfiguredOwner && foundRole === 'customer') {
+              foundRole = 'client';
+            }
+            setUserProfile(matchedProfile);
             setUserRole(foundRole);
-            setIsAdmin(foundRole === 'admin' || foundRole === 'superadmin');
+            setIsAdmin(
+              isAdminWorkspaceRole(foundRole) ||
+                isConfiguredOwner ||
+                isSuperAdminEmail(userEmail)
+            );
           } else {
-            if (userEmail === 'admin@sunmedx.in') {
-              setUserRole('admin');
-              setIsAdmin(true);
-            } else if (userEmail === 'krishnadigitalai@gmail.com' || userEmail === 'superadmin@sunmedx.in') {
+            if (hadUserDocRef.current && !isSuperAdminEmail(userEmail)) {
+              hadUserDocRef.current = false;
+              setAuthNotice('Your account has been removed by the platform Super Admin.');
+              getAuth().signOut().catch(() => {});
+              setUserEmail('');
+              setUserId('');
+              setUserProfile(null);
+              setIsAdmin(false);
+              setUserRole('customer');
+              window.location.hash = '#auth';
+              return;
+            }
+            setUserProfile(null);
+            if (isSuperAdminEmail(userEmail)) {
               setUserRole('superadmin');
+              setIsAdmin(true);
+            } else if (userEmail === 'admin@sunmedx.in' || isConfiguredOwner) {
+              setUserRole('client');
               setIsAdmin(true);
             } else if (userEmail === 'tech@sunmedx.in') {
               setUserRole('technician');
@@ -168,7 +248,7 @@ export default function App() {
         (error: any) => console.error('User profile subscription error:', error)
       );
     return () => unsub();
-  }, [userEmail]);
+  }, [userEmail, siteSettings?.ownerEmail]);
 
   const [postAuthHash, setPostAuthHash] = useState<string>('');
 
@@ -201,12 +281,20 @@ export default function App() {
     setDiagLoading(true);
     setDiagError(null);
     try {
+      const currentPlan = resolveUserPlan(subscriptionPlans, userProfile?.planId);
+      const effectiveUsed = getEffectiveAiUsage(
+        userProfile?.aiQueriesUsed,
+        userProfile?.aiQuotaResetMonth
+      );
       const res = await fetch('/api/diagnose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           equipmentType: diagEquipmentType.trim(),
           problemDescription: diagProblemDesc.trim(),
+          userRole: userProfile?.role || userRole,
+          aiQueriesUsed: effectiveUsed,
+          aiQueryLimit: currentPlan.aiQueryLimitPerMonth,
         }),
       });
       const data = await res.json();
@@ -214,6 +302,19 @@ export default function App() {
         throw new Error(data?.error || `Diagnosis request failed (${res.status})`);
       }
       setDiagResult(data);
+      if (userProfile?.uid) {
+        try {
+          await getDb()
+            .collection('users')
+            .doc(userProfile.uid)
+            .update({
+              aiQueriesUsed: effectiveUsed + 1,
+              aiQuotaResetMonth: getCurrentMonthKey(),
+            });
+        } catch (trackErr) {
+          console.warn('Unable to increment AI quota usage:', trackErr);
+        }
+      }
     } catch (err: any) {
       setDiagError(err?.message || 'Unable to run AI fault diagnosis right now.');
     } finally {
@@ -263,6 +364,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (siteSettings?.siteName) {
+      document.title = `${siteSettings.siteName} — ${siteSettings.tagline || 'Biomedical Engineering & Calibration'}`;
+    }
     if (siteSettings?.themeVariables) {
       const root = document.documentElement;
       const theme = siteSettings.themeVariables;
@@ -278,17 +382,22 @@ export default function App() {
   }, [siteSettings]);
 
   const handleAuthSuccess = (user: AuthUser) => {
+    setAuthNotice('');
+    hadUserDocRef.current = false;
     const normalizedEmail = (user.email || '').trim().toLowerCase();
     const role = user.role || 'customer';
+    const isOwnerMatch =
+      Boolean(siteSettings?.ownerEmail) &&
+      siteSettings!.ownerEmail!.trim().toLowerCase() === normalizedEmail;
     const adminAccess =
-      role === 'admin' ||
-      role === 'superadmin' ||
+      isAdminWorkspaceRole(role) ||
+      isOwnerMatch ||
       normalizedEmail === 'admin@sunmedx.in' ||
-      normalizedEmail === 'krishnadigitalai@gmail.com';
+      isSuperAdminEmail(normalizedEmail);
 
     setUserEmail(normalizedEmail);
     setUserId(user.uid);
-    setUserRole(role);
+    setUserRole(isOwnerMatch && role === 'customer' ? 'client' : role);
     setIsAdmin(adminAccess);
 
     if (postAuthHash === '#admin' && adminAccess) {
@@ -322,6 +431,7 @@ export default function App() {
     }
     setUserEmail('');
     setUserId('');
+    setUserProfile(null);
     setIsAdmin(false);
     setUserRole('customer');
     window.location.hash = '#home';
@@ -389,9 +499,17 @@ export default function App() {
             onClick={() => handleNavigateTo('#home')}
             className="flex items-center gap-2.5 shrink-0 text-left focus:outline-none group"
           >
-            <div className="w-9 h-9 rounded-lg bg-[#211D70] flex items-center justify-center text-[#F8C72E] shadow-xs">
-              <Activity className="w-5 h-5 stroke-[2.25]" />
-            </div>
+            {siteSettings?.logoUrl ? (
+              <img
+                src={siteSettings.logoUrl}
+                alt={siteSettings.siteName || 'Brand Logo'}
+                className="w-9 h-9 rounded-lg object-contain bg-white border border-[#D4D6E2] p-0.5 shadow-xs"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-lg bg-[#211D70] flex items-center justify-center text-[#F8C72E] shadow-xs">
+                <Activity className="w-5 h-5 stroke-[2.25]" />
+              </div>
+            )}
             <span className="font-syne font-extrabold text-[#211D70] text-lg tracking-tight whitespace-nowrap">
               {siteSettings?.siteName || 'SunMedX'}
             </span>
@@ -407,6 +525,9 @@ export default function App() {
             </button>
             <button onClick={() => handleNavigateTo('#catalogue')} className={navLinkClass(currentHash === '#catalogue')}>
               Catalogue
+            </button>
+            <button onClick={() => handleNavigateTo('#plans')} className={navLinkClass(currentHash === '#plans')}>
+              Plans
             </button>
             <button onClick={() => handleNavigateTo('#academy')} className={navLinkClass(currentHash === '#academy')}>
               Academy
@@ -531,7 +652,7 @@ export default function App() {
                 className="py-2 px-4 rounded-md bg-[#211D70] hover:bg-[#272F78] text-[#F8C72E] text-xs font-bold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-xs"
               >
                 <LogIn className="w-3.5 h-3.5" />
-                <span>Sign In</span>
+                <span>Sign In to Portal</span>
               </button>
             )}
           </div>
@@ -553,6 +674,7 @@ export default function App() {
             <button onClick={() => handleNavigateTo('#home')} className="text-left py-2 hover:text-[#F26522]">Home</button>
             <button onClick={() => handleNavigateTo('#services')} className="text-left py-2 hover:text-[#F26522]">Services</button>
             <button onClick={() => handleNavigateTo('#catalogue')} className="text-left py-2 hover:text-[#F26522]">Catalogue</button>
+            <button onClick={() => handleNavigateTo('#plans')} className="text-left py-2 hover:text-[#F26522]">Subscription Plans</button>
             <button onClick={() => handleNavigateTo('#academy')} className="text-left py-2 hover:text-[#F26522]">Academy</button>
             <button onClick={() => handleNavigateTo('#tools')} className="text-left py-2 hover:text-[#F26522]">Smart Calculators</button>
             <button onClick={() => handleNavigateTo('#about')} className="text-left py-2 hover:text-[#F26522]">About &amp; Contact</button>
@@ -580,9 +702,9 @@ export default function App() {
                     setMobileMenuOpen(false);
                     handleNavigateTo('#auth');
                   }}
-                  className="w-full py-2.5 rounded-md bg-[#211D70] text-[#F8C72E] text-xs font-bold text-center"
+                  className="w-full py-2.5 rounded-md bg-[#211D70] text-[#F8C72E] text-xs font-bold text-center whitespace-nowrap"
                 >
-                  Sign In
+                  Sign In to Portal
                 </button>
               )}
             </div>
@@ -592,7 +714,15 @@ export default function App() {
 
       {/* CORE ROUTING RENDER LOGIC */}
       <main className="flex-1 relative z-10">
-        {currentHash === '#home' && <Home onNavigate={handleNavigateTo} siteSettings={siteSettings} />}
+        {(currentHash === '#home' || currentHash === '#plans') && (
+          <Home
+            onNavigate={handleNavigateTo}
+            siteSettings={siteSettings}
+            subscriptionPlans={subscriptionPlans}
+            userEmail={userEmail}
+            scrollToPlans={currentHash === '#plans'}
+          />
+        )}
 
         {currentHash === '#services' && <Services userId={userId} userEmail={userEmail} />}
 
@@ -632,7 +762,14 @@ export default function App() {
         {/* AUTH PROTECTED CUSTOMER PORTAL (Dark Operational Console Wrapper) */}
         {currentHash === '#customer-portal' && userEmail && (
           <div className="bg-[#0B1120] text-slate-100 min-h-[75vh] py-4">
-            <CustomerPortal userId={userId} userEmail={userEmail} siteSettings={siteSettings} />
+            <CustomerPortal
+              userId={userId}
+              userEmail={userEmail}
+              userProfile={userProfile}
+              userRole={userRole}
+              subscriptionPlans={subscriptionPlans}
+              siteSettings={siteSettings}
+            />
           </div>
         )}
 
@@ -651,14 +788,16 @@ export default function App() {
           (currentHash === '#admin' && !isAdmin)) && (
           <AuthPage
             initialMode={currentHash === '#signup' ? 'signup' : 'signin'}
+            externalNotice={authNotice}
+            onDismissNotice={() => setAuthNotice('')}
             onSuccess={handleAuthSuccess}
             onCancel={() => handleNavigateTo('#home')}
           />
         )}
 
-        {/* AUTH PROTECTED ADMIN WORKSPACE BACKOFFICE (Dark Operational Console Wrapper) */}
+        {/* AUTH PROTECTED ADMIN WORKSPACE BACKOFFICE */}
         {currentHash === '#admin' && isAdmin && (
-          <div className="bg-[#0B1120] text-slate-100 min-h-[75vh] py-4">
+          <div className="bg-[#F6F7FB] text-slate-900 min-h-[calc(100vh-4rem)]">
             <AdminPanel
               adminEmail={userEmail}
               onLogout={handleLogout}
@@ -994,15 +1133,24 @@ export default function App() {
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border-b border-white/15 pb-6">
             <div className="space-y-1.5">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-[#F8C72E] flex items-center justify-center text-[#211D70]">
-                  <Activity className="w-4 h-4 stroke-[2.5]" />
-                </div>
+                {siteSettings?.logoUrl ? (
+                  <img
+                    src={siteSettings.logoUrl}
+                    alt={siteSettings.siteName || 'Brand Logo'}
+                    className="w-8 h-8 rounded-lg object-contain bg-white p-0.5"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-lg bg-[#F8C72E] flex items-center justify-center text-[#211D70]">
+                    <Activity className="w-4 h-4 stroke-[2.5]" />
+                  </div>
+                )}
                 <h4 className="font-syne font-bold text-white text-base tracking-tight">
                   {siteSettings?.siteName || 'SunMedX'}
                 </h4>
               </div>
               <p className="text-xs text-white/80 max-w-md leading-relaxed">
-                Accredited biomedical calibration, ICU equipment AMC validation, and clinical engineering education across Mumbai &amp; Maharashtra.
+                {siteSettings?.tagline ||
+                  'Accredited biomedical calibration, ICU equipment AMC validation, and clinical engineering education across Mumbai & Maharashtra.'}
               </p>
             </div>
 
@@ -1012,6 +1160,9 @@ export default function App() {
               </button>
               <button onClick={() => handleNavigateTo('#catalogue')} className="hover:text-[#F8C72E] transition-colors">
                 Equipment Catalogue
+              </button>
+              <button onClick={() => handleNavigateTo('#plans')} className="hover:text-[#F8C72E] transition-colors">
+                Subscription Plans
               </button>
               <button onClick={() => handleNavigateTo('#academy')} className="hover:text-[#F8C72E] transition-colors">
                 Training Academy
@@ -1036,7 +1187,14 @@ export default function App() {
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-white/80">
             <p className="text-center sm:text-left">
-              © {new Date().getFullYear()} {siteSettings?.siteName || 'SunMedX'} • Mumbai, Maharashtra • ISO 17025 / NABL Aligned
+              © {new Date().getFullYear()} {siteSettings?.siteName || 'SunMedX'} •{' '}
+              {siteSettings?.customDomain ? `${siteSettings.customDomain} • ` : ''}
+              {siteSettings?.address || 'Mumbai, Maharashtra'} • ISO 17025 / NABL Aligned
+              {siteSettings?.poweredByVisible !== false &&
+                siteSettings?.siteName &&
+                siteSettings.siteName.toLowerCase() !== 'sunmedx' && (
+                  <span className="ml-2 text-white/60">· Powered by SunMedX</span>
+                )}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-4">
               <span className="flex items-center gap-1.5">
