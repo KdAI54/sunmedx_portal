@@ -61,7 +61,10 @@ function cartReducer(state: CartItem[], action: CartAction): CartItem[] {
 }
 
 export default function App() {
-  const [currentHash, setCurrentHash] = useState(window.location.hash || '#home');
+  const [currentHash, setCurrentHash] = useState<string>(() => {
+    const raw = window.location.hash || '';
+    return raw.startsWith('#equipment/') ? raw : '#home';
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [isInitializing, setIsInitializing] = useState(true);
@@ -323,8 +326,46 @@ export default function App() {
   };
 
   useEffect(() => {
+    const raw = window.location.hash || '';
+    if (!raw.startsWith('#equipment/') && raw !== '#home') {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}#home`
+      );
+      setCurrentHash('#home');
+    }
+    window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
+    const allowedHashes = new Set([
+      '#home',
+      '#services',
+      '#catalogue',
+      '#plans',
+      '#academy',
+      '#about',
+      '#tools',
+      '#customer-portal',
+      '#admin',
+      '#auth',
+      '#signin',
+      '#signup',
+      '#privacy-policy',
+      '#terms',
+      '#refund-policy',
+      '#calibration-policy',
+    ]);
+
     const handleHashChange = () => {
-      const hash = window.location.hash || '#home';
+      const rawHash = window.location.hash || '#home';
+      const baseHash = rawHash.split('?')[0] || '#home';
+      const hash =
+        allowedHashes.has(baseHash) || baseHash.startsWith('#equipment/')
+          ? baseHash
+          : '#home';
+
       setCurrentHash(hash);
       setMobileMenuOpen(false);
       window.scrollTo(0, 0);
@@ -438,6 +479,12 @@ export default function App() {
   };
 
   const handleNavigateTo = (hash: string) => {
+    if (window.location.hash === hash) {
+      setCurrentHash(hash);
+      setMobileMenuOpen(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     window.location.hash = hash;
   };
 
